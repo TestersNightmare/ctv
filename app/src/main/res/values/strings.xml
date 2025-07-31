@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">看电视</string>
+    <string name="navigation_drawer_open">打开导航抽屉</string>
+    <string name="navigation_drawer_close">关闭导航抽屉</string>
+    <string name="loading">加载中...</string>
+    <string name="error_loading_channels">加载频道列表失败</string>
+    <string name="no_channels">暂无频道</string>
+</resources>

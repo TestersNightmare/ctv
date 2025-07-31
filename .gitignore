@@ -1,6 +1,7 @@
 # Android Studio
 *.iml
 .gradle
+/buildAndSign.bat
 /local.properties
 /.idea/caches
 /.idea/libraries
@@ -21,6 +22,8 @@
 #keystore
 *.key
 *.pub
+*.bat
+
 
 # Files for the ART/Dalvik VM
 *.dex

@@ -20,23 +20,26 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
-// 正确的导入语句
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
-import okhttp3.Call;
-import okhttp3.Callback;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
+
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
     private static final String DEFAULT_URL = "https://www.yangshipin.cn/tv/home?pid=600001859";
-    private static final String M3U_URL = "https://gitee.com/QQ10523797/ctv/raw/master/link";
+    private static final String CHANNELS_URL = "https://gitee.com/magasb/ctvplayer/blob/master/app/src/main/assets/channels.json";
     private static final String PREFS_NAME = "CTVPlayerPrefs";
     private static final String CHANNELS_KEY = "channels";
 
@@ -47,6 +50,7 @@ public class MainActivity extends AppCompatActivity {
     private List<Channel> channels = new ArrayList<>();
     private SharedPreferences prefs;
     private Gson gson;
+    private boolean isConfigValid = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -59,12 +63,6 @@ public class MainActivity extends AppCompatActivity {
         setupWebView();
         loadChannels();
         setImmersiveMode();
-
-        // 点击 WebView 打开抽屉
-        webView.setOnTouchListener((v, event) -> {
-            drawerLayout.openDrawer(channelList);
-            return false;
-        });
     }
 
     private void initViews() {
@@ -140,8 +138,10 @@ public class MainActivity extends AppCompatActivity {
                                 "})()",
                         result -> {
                             if (result != null && result.contains("No video element found")) {
-                                Toast.makeText(MainActivity.this, "播放失败，重新加载频道列表", Toast.LENGTH_SHORT).show();
-                                loadChannelsFromNetwork(true); // 播放失败时重新获取
+                                Toast.makeText(MainActivity.this, getString(R.string.network_error), Toast.LENGTH_SHORT).show();
+                                if (isConfigValid) {
+                                    loadChannelsFromJson();
+                                }
                             }
                         }
                 );
@@ -150,8 +150,10 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 super.onReceivedError(view, request, error);
-                Toast.makeText(MainActivity.this, "加载失败，尝试重新获取频道列表", Toast.LENGTH_SHORT).show();
-                loadChannelsFromNetwork(true); // 网络错误时重新获取
+                Toast.makeText(MainActivity.this, getString(R.string.network_error), Toast.LENGTH_SHORT).show();
+                if (isConfigValid) {
+                    loadChannelsFromJson();
+                }
             }
         });
 
@@ -184,6 +186,10 @@ public class MainActivity extends AppCompatActivity {
         });
 
         webView.loadUrl(DEFAULT_URL);
+        webView.setOnTouchListener((v, event) -> {
+            drawerLayout.openDrawer(channelList);
+            return false;
+        });
     }
 
     private void loadChannels() {
@@ -191,45 +197,179 @@ public class MainActivity extends AppCompatActivity {
         if (channelsJson != null) {
             Type type = new TypeToken<List<Channel>>(){}.getType();
             channels = gson.fromJson(channelsJson, type);
-            setupChannelList();
+            if (channels == null) channels = new ArrayList<>();
+            validateChannels();
         } else {
-            loadChannelsFromNetwork(false);
+            loadChannelsFromConfig();
         }
     }
 
-    private void loadChannelsFromNetwork(boolean forceReload) {
+    private void loadChannelsFromConfig() {
+        try {
+            String json = readAssetFile("channels.config");
+            if (json != null) {
+                channels = ChannelParser.parseJson(json);
+                isConfigValid = true;
+                validateChannels();
+            } else {
+                loadChannelsFromJson();
+            }
+        } catch (IOException e) {
+            loadChannelsFromJson();
+        }
+    }
+
+    private void loadChannelsFromJson() {
+        try {
+            String json = readAssetFile("channels.json");
+            if (json != null) {
+                channels = ChannelParser.parseJson(json);
+                isConfigValid = false;
+                validateChannels();
+            } else {
+                Toast.makeText(this, getString(R.string.no_channels), Toast.LENGTH_SHORT).show();
+                channels = new ArrayList<>();
+                setupChannelList();
+            }
+        } catch (IOException e) {
+            Toast.makeText(this, getString(R.string.no_channels), Toast.LENGTH_SHORT).show();
+            channels = new ArrayList<>();
+            setupChannelList();
+        }
+    }
+
+    private String readAssetFile(String fileName) throws IOException {
+        try (InputStream inputStream = getAssets().open(fileName)) {
+            BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+            StringBuilder builder = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                builder.append(line);
+            }
+            return builder.toString();
+        } catch (IOException e) {
+            throw e;
+        }
+    }
+
+    private void validateChannels() {
+        if (channels.isEmpty()) {
+            if (isConfigValid) {
+                loadChannelsFromJson();
+            } else {
+                runOnUiThread(() -> Toast.makeText(this, getString(R.string.no_channels), Toast.LENGTH_SHORT).show());
+            }
+            return;
+        }
+
         new Thread(() -> {
-            try {
-                OkHttpClient client = new OkHttpClient();
-                Request request = new Request.Builder().url(M3U_URL).build();
-                Response response = client.newCall(request).execute();
-                if (response.isSuccessful() && response.body() != null) {
-                    String content = response.body().string();
-                    channels = ChannelParser.parseLinkFile(content);
-                    String channelsJson = gson.toJson(channels);
-                    prefs.edit().putString(CHANNELS_KEY, channelsJson).apply();
-                    runOnUiThread(() -> {
-                        setupChannelList();
-                        if (!channels.isEmpty()) {
-                            webView.loadUrl(channels.get(0).getUrl());
-                        }
-                    });
-                } else {
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "加载频道列表失败", Toast.LENGTH_SHORT).show());
+            boolean allFailed = true;
+            for (Channel channel : channels) {
+                if (channel == null || channel.getUrl() == null || channel.getUrl().isEmpty()) {
+                    continue;
                 }
-            } catch (IOException e) {
-                runOnUiThread(() -> Toast.makeText(MainActivity.this, "网络错误: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                try {
+                    OkHttpClient client = new OkHttpClient();
+                    Request request = new Request.Builder().url(channel.getUrl()).build();
+                    Response response = client.newCall(request).execute();
+                    if (response.isSuccessful()) {
+                        allFailed = false;
+                        break;
+                    }
+                } catch (IOException e) {
+                    // Continue checking other channels
+                }
+            }
+            if (allFailed && isConfigValid) {
+                runOnUiThread(() -> {
+                    Toast.makeText(this, getString(R.string.network_error), Toast.LENGTH_SHORT).show();
+                    loadChannelsFromJson();
+                });
+            } else {
+                runOnUiThread(() -> {
+                    setupChannelList();
+                    if (!channels.isEmpty() && channels.get(0).getUrl() != null) {
+                        webView.loadUrl(channels.get(0).getUrl());
+                    } else {
+                        webView.loadUrl(DEFAULT_URL);
+                        Toast.makeText(this, "无有效频道，使用默认地址", Toast.LENGTH_SHORT).show();
+                    }
+                });
             }
         }).start();
     }
 
     private void setupChannelList() {
-        ChannelAdapter adapter = new ChannelAdapter(channels, url -> {
-            webView.loadUrl(url);
-            drawerLayout.closeDrawer(channelList);
-            Toast.makeText(MainActivity.this, "切换到频道", Toast.LENGTH_SHORT).show();
-        });
+        ChannelAdapter adapter = new ChannelAdapter(
+                this,
+                channels,
+                url -> {
+                    if (url != null && !url.isEmpty()) {
+                        webView.loadUrl(url);
+                        drawerLayout.closeDrawer(channelList);
+                        Toast.makeText(this, "切换到频道", Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(this, "频道地址无效", Toast.LENGTH_SHORT).show();
+                    }
+                },
+                this::updateChannels
+        );
         channelList.setAdapter(adapter);
+    }
+
+    private void updateChannels() {
+        new Thread(() -> {
+            try {
+                OkHttpClient client = new OkHttpClient();
+                Request request = new Request.Builder().url(CHANNELS_URL).build();
+                Response response = client.newCall(request).execute();
+                if (response.isSuccessful() && response.body() != null) {
+                    String html = response.body().string();
+                    String json = extractJsonFromHtml(html);
+                    if (json != null) {
+                        saveChannelsToConfig(json);
+                        channels = ChannelParser.parseJson(json);
+                        prefs.edit().putString(CHANNELS_KEY, json).apply();
+                        runOnUiThread(() -> {
+                            setupChannelList();
+                            if (!channels.isEmpty() && channels.get(0).getUrl() != null) {
+                                webView.loadUrl(channels.get(0).getUrl());
+                            } else {
+                                webView.loadUrl(DEFAULT_URL);
+                                Toast.makeText(this, "无有效频道，使用默认地址", Toast.LENGTH_SHORT).show();
+                            }
+                            Toast.makeText(this, "频道更新成功", Toast.LENGTH_SHORT).show();
+                        });
+                    } else {
+                        runOnUiThread(() -> Toast.makeText(this, "解析频道数据失败", Toast.LENGTH_SHORT).show());
+                    }
+                } else {
+                    runOnUiThread(() -> Toast.makeText(this, "更新频道失败", Toast.LENGTH_SHORT).show());
+                }
+            } catch (IOException e) {
+                runOnUiThread(() -> Toast.makeText(this, "网络错误: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        }).start();
+    }
+
+    private String extractJsonFromHtml(String html) {
+        int start = html.indexOf("<pre>");
+        int end = html.indexOf("</pre>");
+        if (start != -1 && end != -1) {
+            return html.substring(start + 5, end).trim();
+        }
+        return null;
+    }
+
+    private void saveChannelsToConfig(String json) {
+        try {
+            File file = new File(getFilesDir(), "channels.config");
+            try (FileOutputStream fos = new FileOutputStream(file)) {
+                fos.write(json.getBytes());
+            }
+        } catch (IOException e) {
+            runOnUiThread(() -> Toast.makeText(this, "保存频道数据失败", Toast.LENGTH_SHORT).show());
+        }
     }
 
     private void setImmersiveMode() {

@@ -1,0 +1,8 @@
+[
+    {"name": "CCTV1", "pid": 600001859, "ic_url": ""},
+    {"name": "CCTV2", "pid": 600001800, "ic_url": ""},
+    {"name": "CCTV4", "pid": 600001814, "ic_url": ""},
+    {"name": "CCTV5", "pid": 600001818, "ic_url": ""},
+    {"name": "CCTV6", "pid": 600108442, "ic_url": ""},
+    {"name": "CCTV8", "pid": 600001803, "ic_url": ""},
+]

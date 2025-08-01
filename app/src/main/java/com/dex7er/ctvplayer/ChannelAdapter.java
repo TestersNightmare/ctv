@@ -26,7 +26,7 @@ public class ChannelAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     private Context context;
 
     public interface OnChannelClickListener {
-        void onChannelClick(String url);
+        void onChannelClick(Channel channel);
     }
 
     public interface OnUpdateButtonClickListener {
@@ -109,7 +109,7 @@ public class ChannelAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
                 String url = channel.getUrl();
                 if (url != null && !url.isEmpty()) {
                     Log.d(TAG, "Channel clicked: " + channelName + " (" + url + ")");
-                    channelListener.onChannelClick(url);
+                    channelListener.onChannelClick(channel);
                 } else {
                     // 安全显示 Toast
                     Log.w(TAG, "Channel URL is invalid: " + channelName);

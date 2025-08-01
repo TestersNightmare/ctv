@@ -7,7 +7,7 @@
     <string name="load_channels_failed">加载频道列表失败</string>
     <string name="no_channels">暂无频道</string>
     <string name="network_error">网络无法连接</string>
-    <string name="update_channels">更新频道</string>
+    <string name="update_channels">更新频道列表</string>
     <string name="channel_icon_description">频道图标</string>
     <string name="invalid_channel_url">频道地址无效</string>
     <string name="app_background_description">背景图标</string>

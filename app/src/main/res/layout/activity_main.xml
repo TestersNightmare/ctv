@@ -1,20 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.drawerlayout.widget.DrawerLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.drawerlayout.widget.DrawerLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/drawer_layout"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <!-- 主内容区域 -->
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent">
 
+        <!-- WebView 放在前面，确保 loading_layout 在其上层 -->
         <WebView
             android:id="@+id/webview"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
+        <!-- 顶部进度条 -->
         <ProgressBar
             android:id="@+id/progress_bar"
             style="?android:attr/progressBarStyleHorizontal"
@@ -22,13 +23,132 @@
             android:layout_height="wrap_content"
             android:layout_gravity="top"
             android:visibility="gone" />
+
+        <!-- 加载界面，确保在 WebView 之后 -->
+        <FrameLayout
+            android:id="@+id/loading_layout"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@android:color/transparent"
+            android:visibility="visible">
+
+            <!-- 不透明的APP图标背景，保持比例，缩放0.8倍 -->
+            <ImageView
+                android:id="@+id/app_background_icon"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerInside"
+                android:src="@mipmap/app_logo"
+                android:scaleX="0.8"
+                android:scaleY="0.8"
+                android:alpha="1.0"
+                android:contentDescription="APP背景图标" />
+
+            <!-- 顶部频道信息栏 -->
+            <LinearLayout
+                android:id="@+id/top_channel_info"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top"
+                android:orientation="horizontal"
+                android:padding="16dp"
+                android:gravity="center_vertical"
+                android:background="#99000000"
+                android:visibility="gone">
+
+                <!-- 频道图标 (移到顶部) -->
+                <ImageView
+                    android:id="@+id/loading_channel_icon"
+                    android:layout_width="60dp"
+                    android:layout_height="60dp"
+                    android:layout_marginEnd="16dp"
+                    android:scaleType="centerInside"
+                    android:src="@drawable/ic_tv_default"
+                    android:contentDescription="频道图标" />
+
+                <!-- 频道名称和状态文本 -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/loading_channel_text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="正在加载..."
+                        android:textColor="#FFFFFF"
+                        android:textSize="18sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/loading_status_text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="请稍候"
+                        android:textColor="#CCFFFFFF"
+                        android:textSize="14sp"
+                        android:layout_marginTop="4dp" />
+
+                </LinearLayout>
+
+                <!-- 加载指示器 -->
+                <ProgressBar
+                    android:id="@+id/loading_indicator"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:layout_marginStart="16dp"
+                    style="?android:attr/progressBarStyle" />
+
+            </LinearLayout>
+
+            <!-- 中央加载区域 (初始状态) -->
+            <LinearLayout
+                android:id="@+id/center_loading_layout"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:visibility="visible">
+
+                <ImageView
+                    android:id="@+id/center_loading_icon"
+                    android:layout_width="120dp"
+                    android:layout_height="120dp"
+                    android:scaleType="centerInside"
+                    android:layout_marginBottom="16dp"
+                    android:src="@drawable/ic_tv_default"
+                    android:contentDescription="加载中图标" />
+
+                <ProgressBar
+                    android:id="@+id/center_loading_indicator"
+                    style="?android:attr/progressBarStyle"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_marginBottom="16dp" />
+
+                <TextView
+                    android:id="@+id/center_loading_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="#FFFFFF"
+                    android:textSize="18sp"
+                    android:text="正在初始化..." />
+
+            </LinearLayout>
+
+        </FrameLayout>
+
     </FrameLayout>
 
-    <!-- 左侧抽屉：频道列表 -->
+    <!-- 侧边栏 - 频道列表，调整宽度以适应3列图标 -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/channel_list"
-        android:layout_width="200dp"
+        android:layout_width="280dp"
         android:layout_height="match_parent"
         android:layout_gravity="start"
-        android:background="#80000000" />
+        android:background="#FF1E1E1E"
+        android:padding="8dp" />
+
 </androidx.drawerlayout.widget.DrawerLayout>

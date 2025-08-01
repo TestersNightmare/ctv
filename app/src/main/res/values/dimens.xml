@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="channel_icon_height_ratio">0.5</dimen> <!-- 频道图标高度（屏幕高度比例） -->
+    <dimen name="loading_indicator_size">48dp</dimen> <!-- 旋转标志尺寸 -->
+    <dimen name="channel_text_size">24sp</dimen> <!-- 文字大小 -->
+</resources>

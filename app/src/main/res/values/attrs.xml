@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <attr name="channel_icon_alpha" format="float" /> <!-- 频道图标透明度 -->
+    <attr name="loading_indicator_alpha" format="float" /> <!-- 旋转标志透明度 -->
+    <attr name="channel_text_alpha" format="float" /> <!-- 文字透明度 -->
+</resources>

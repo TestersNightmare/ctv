@@ -6,8 +6,8 @@
 
     <ImageView
         android:id="@+id/channel_icon"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
+        android:layout_width="96dp"
+        android:layout_height="96dp"
         android:layout_gravity="center"
         android:scaleType="centerInside"
         android:background="?android:attr/selectableItemBackground"

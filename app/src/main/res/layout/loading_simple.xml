@@ -19,15 +19,15 @@
             android:layout_height="120dp"
             android:scaleType="centerInside"
             android:src="@drawable/ic_tv_default"
-            android:layout_marginBottom="24dp"
+            android:layout_marginBottom="192dp"
             android:contentDescription="当前频道图标" />
 
         <!-- 旋转等待图 -->
         <ProgressBar
             android:id="@+id/loading_spinner"
             style="?android:attr/progressBarStyle"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="96dp"
+            android:layout_height="96dp"
             android:indeterminateTint="#FFFFFF" />
 
     </LinearLayout>

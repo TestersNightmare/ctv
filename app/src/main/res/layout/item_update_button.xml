@@ -1,10 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Button xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/update_button"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:text="@string/update_channels"
-    android:textColor="@color/white"
-    android:background="@color/primary_color"
-    android:padding="12dp"
-    android:layout_margin="8dp" />
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:gravity="center">
+
+    <Button
+        android:id="@+id/update_button"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:text="更新频道列表"
+        android:textColor="#FFFFFF"
+        android:background="#FF6B35"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+</LinearLayout>

@@ -11,7 +11,6 @@ import android.widget.TextView;
 import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
-import androidx.recyclerview.widget.GridLayoutManager;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -20,13 +19,13 @@ public class TwoColumnChannelAdapter extends RecyclerView.Adapter<RecyclerView.V
     private static final int TYPE_CHANNEL = 0;
     private static final int TYPE_UPDATE_BUTTON = 1;
 
-    private List<Channel> allChannels; // Flattened list of all channels
+    private List<Channel> allChannels;
     private OnChannelClickListener channelListener;
     private OnUpdateButtonClickListener updateListener;
     private Context context;
 
     public interface OnChannelClickListener {
-        void onChannelClick(String url);
+        void onChannelClick(Channel channel);
     }
 
     public interface OnUpdateButtonClickListener {
@@ -41,7 +40,6 @@ public class TwoColumnChannelAdapter extends RecyclerView.Adapter<RecyclerView.V
         this.updateListener = updateListener;
         this.allChannels = new ArrayList<>();
 
-        // Flatten all channels from all groups
         if (channelGroups != null) {
             for (ChannelGroup group : channelGroups) {
                 if (group.getChannels() != null) {
@@ -49,10 +47,7 @@ public class TwoColumnChannelAdapter extends RecyclerView.Adapter<RecyclerView.V
                 }
             }
         }
-
-        // Remove null channels
         allChannels.removeIf(c -> c == null);
-
         Log.d(TAG, "TwoColumnChannelAdapter created with " + allChannels.size() + " channels");
     }
 
@@ -76,20 +71,14 @@ public class TwoColumnChannelAdapter extends RecyclerView.Adapter<RecyclerView.V
     @Override
     public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
         if (holder instanceof ChannelViewHolder) {
-            if (position >= allChannels.size()) {
-                Log.w(TAG, "Position " + position + " is out of bounds for channels list of size " + allChannels.size());
-                return;
-            }
+            if (position >= allChannels.size()) return;
 
             Channel channel = allChannels.get(position);
-            if (channel == null) {
-                Log.w(TAG, "Channel at position " + position + " is null");
-                return;
-            }
+            if (channel == null) return;
 
             ChannelViewHolder channelHolder = (ChannelViewHolder) holder;
 
-            // Hide channel name text, only show icon
+            // 隐藏文字，只显示图标
             if (channelHolder.channelName != null) {
                 channelHolder.channelName.setVisibility(View.GONE);
             }
@@ -97,47 +86,57 @@ public class TwoColumnChannelAdapter extends RecyclerView.Adapter<RecyclerView.V
                 channelHolder.channelNameOnIcon.setVisibility(View.GONE);
             }
 
-            // Load icon from mipmap directory
-            String icUrl = channel.getIcUrl();
-            if (icUrl != null && !icUrl.isEmpty()) {
-                // Remove file extension and convert to resource name
-                String iconName = icUrl.replace(".png", "").replace(".jpg", "").replace(".jpeg", "");
-                int resourceId = context.getResources().getIdentifier(iconName, "mipmap", context.getPackageName());
+            // 加载图标
+            loadChannelIcon(channelHolder.channelIcon, channel);
 
-                if (resourceId != 0) {
-                    channelHolder.channelIcon.setImageResource(resourceId);
-                } else {
-                    // Fallback to drawable if not found in mipmap
-                    resourceId = context.getResources().getIdentifier(iconName, "drawable", context.getPackageName());
-                    if (resourceId != 0) {
-                        channelHolder.channelIcon.setImageResource(resourceId);
-                    } else {
-                        channelHolder.channelIcon.setImageResource(R.drawable.ic_tv_default);
+            // 设置点击监听
+            channelHolder.itemView.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (channelListener != null) {
+                        channelListener.onChannelClick(channel);
                     }
-                }
-            } else {
-                channelHolder.channelIcon.setImageResource(R.drawable.ic_tv_default);
-            }
-
-            // Set click listener
-            channelHolder.itemView.setOnClickListener(v -> {
-                String url = channel.getUrl();
-                if (url != null && !url.isEmpty()) {
-                    Log.d(TAG, "Channel clicked: " + channel.getName() + " (" + url + ")");
-                    channelListener.onChannelClick(url);
-                } else {
-                    Log.w(TAG, "Channel URL is invalid: " + channel.getName());
-                    Toast.makeText(context, "频道地址无效", Toast.LENGTH_SHORT).show();
                 }
             });
 
         } else if (holder instanceof UpdateButtonViewHolder) {
-            ((UpdateButtonViewHolder) holder).updateButton.setOnClickListener(v -> {
-                Log.d(TAG, "Update button clicked");
-                if (updateListener != null) {
-                    updateListener.onUpdateButtonClick();
+            UpdateButtonViewHolder updateHolder = (UpdateButtonViewHolder) holder;
+
+            // 修复：确保更新按钮的点击监听器正确设置
+            updateHolder.updateButton.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    Log.d(TAG, "Update button clicked");
+                    Toast.makeText(context, "正在更新频道列表...", Toast.LENGTH_SHORT).show();
+
+                    if (updateListener != null) {
+                        updateListener.onUpdateButtonClick();
+                    } else {
+                        Log.e(TAG, "updateListener is null!");
+                    }
                 }
             });
+        }
+    }
+
+    private void loadChannelIcon(ImageView iconView, Channel channel) {
+        String icUrl = channel.getIcUrl();
+        if (icUrl != null && !icUrl.isEmpty()) {
+            String iconName = icUrl.replace(".png", "").replace(".jpg", "").replace(".jpeg", "");
+            int resourceId = context.getResources().getIdentifier(iconName, "mipmap", context.getPackageName());
+
+            if (resourceId != 0) {
+                iconView.setImageResource(resourceId);
+            } else {
+                resourceId = context.getResources().getIdentifier(iconName, "drawable", context.getPackageName());
+                if (resourceId != 0) {
+                    iconView.setImageResource(resourceId);
+                } else {
+                    iconView.setImageResource(R.drawable.ic_tv_default);
+                }
+            }
+        } else {
+            iconView.setImageResource(R.drawable.ic_tv_default);
         }
     }
 
@@ -165,6 +164,9 @@ public class TwoColumnChannelAdapter extends RecyclerView.Adapter<RecyclerView.V
         UpdateButtonViewHolder(View itemView) {
             super(itemView);
             updateButton = itemView.findViewById(R.id.update_button);
+            if (updateButton == null) {
+                Log.e(TAG, "update_button not found in layout!");
+            }
         }
     }
 }

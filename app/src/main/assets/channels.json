@@ -23,7 +23,7 @@
             {"name":"中央十五台","pid":"600001815","ic_url":"cctv15.png"},
             {"name":"中央十六台","pid":"600098637","ic_url":"cctv16.png"},
             {"name":"中央十七台","pid":"600001810","ic_url":"cctv17.png"},
-            {"name":"中央4K高清台","pid":"600002264","ic_url":"cctv4k.png"}    
+            {"name":"中央4K高清台","pid":"600002264","ic_url":"cctv4k.png"},    
             {"name":"中央8K高清台","pid":"600156816","ic_url":"cctv8k.png"}              
         ]
     },

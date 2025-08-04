@@ -1,5 +1,5 @@
 # 看电视
-![输入图片说明](app/logo1.png)
+![输入图片说明](app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp)
 #### 介绍
 简要显示目标网站内容的老年版看电视客户端，方便不懂互联网操作的老年人看看免费网络电视
 
@@ -13,4 +13,3 @@
 1.  遥控器支持功能待实现
 2.  不得用于非法盈利和其他不正当用途
 3.  代码无罪，责任自负
-![输入图片说明](app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp)

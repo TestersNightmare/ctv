@@ -13,3 +13,4 @@
 1.  遥控器支持功能待实现
 2.  不得用于非法盈利和其他不正当用途
 3.  代码无罪，责任自负
+![输入图片说明](app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp)

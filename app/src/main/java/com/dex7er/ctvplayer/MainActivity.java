@@ -89,6 +89,10 @@ public class MainActivity extends AppCompatActivity {
     private Gson gson;
     private boolean isConfigValid = false;
     private Random random = new Random();
+    private Handler handler = new Handler(Looper.getMainLooper());
+    private static final long VIDEO_CHECK_INTERVAL = 500; // 每500ms检查一次video元素
+    private static final int MAX_RELOAD_ATTEMPTS = 3; // 最大重试次数
+    private int currentReloadAttempts = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -173,22 +177,35 @@ public class MainActivity extends AppCompatActivity {
         ws.setMediaPlaybackRequiresUserGesture(false);
         ws.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
-        // 随机桌面 UA
         String ua = getRandomDesktopUserAgent();
         ws.setUserAgentString(ua);
         Log.d(TAG, "WebView UA: " + ua);
 
-        // 添加桥接接口，供 JS 播放就绪回调
         webView.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void onVideoReady() {
-                // 延迟 1 秒后再隐藏 loading 视图
-                new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        hideSimpleLoading();
-                    }
+                handler.postDelayed(() -> {
+                    hideSimpleLoading();
+                    currentReloadAttempts = 0; // 重置重试计数
                 }, 1000);
+            }
+
+            @JavascriptInterface
+            public void onVideoError(String error) {
+                Log.e(TAG, "Video loading error: " + error);
+                if (currentReloadAttempts < MAX_RELOAD_ATTEMPTS) {
+                    currentReloadAttempts++;
+                    Log.d(TAG, "Retrying load channel, attempt: " + currentReloadAttempts);
+                    handler.postDelayed(() -> {
+                        webView.reload(); // 重新加载页面
+                    }, 1000);
+                } else {
+                    runOnUiThread(() -> {
+                        hideSimpleLoading();
+                        Toast.makeText(MainActivity.this, "无法加载视频，请重试", Toast.LENGTH_SHORT).show();
+                    });
+                    currentReloadAttempts = 0;
+                }
             }
         }, "AndroidBridge");
 
@@ -203,6 +220,7 @@ public class MainActivity extends AppCompatActivity {
             public void onPageStarted(WebView v, String url, android.graphics.Bitmap favicon) {
                 super.onPageStarted(v, url, favicon);
                 setupDesktopEnvironment();
+                currentReloadAttempts = 0; // 重置重试计数
             }
 
             @Override
@@ -210,40 +228,25 @@ public class MainActivity extends AppCompatActivity {
                 super.onPageFinished(v, url);
                 progressBar.setVisibility(View.GONE);
                 setupDesktopEnvironment();
-
-                // 注入 JS，等待或立即处理 <video> 元素
-                new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                    String js =
-                            "(function(){\n" +
-                                    "  function displayVideo(video){\n" +
-                                    "    document.body.innerHTML = '<div style=\"margin:0;padding:0;width:100%;height:100vh;overflow:hidden;\">'+video.outerHTML+'</div>';\n" +
-                                    "    var v = document.querySelector('video');\n" +
-                                    "    v.style.cssText = 'width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;z-index:9999;';\n" +
-                                    "    v.controls = true;\n" +
-                                    "    v.play();\n" +
-                                    "    if(v.requestFullscreen) v.requestFullscreen();\n" +
-                                    "    AndroidBridge.onVideoReady();\n" +
-                                    "  }\n" +
-                                    "  var vid = document.querySelector('video');\n" +
-                                    "  if(vid) displayVideo(vid);\n" +
-                                    "  else {\n" +
-                                    "    var obs = new MutationObserver(function(){\n" +
-                                    "      var v2 = document.querySelector('video');\n" +
-                                    "      if(v2){ displayVideo(v2); obs.disconnect(); }\n" +
-                                    "    });\n" +
-                                    "    obs.observe(document.body,{ childList:true, subtree:true });\n" +
-                                    "  }\n" +
-                                    "})();";
-                    v.evaluateJavascript(js, null);
-                }, 800);
+                checkVideoElement();
             }
 
             @Override
             public void onReceivedError(WebView v, WebResourceRequest req, WebResourceError err) {
                 super.onReceivedError(v, req, err);
-                Log.e(TAG, "WebView error: " + err);
-                hideSimpleLoading();
-                if (isConfigValid) runOnUiThread(MainActivity.this::loadChannelsFromJson);
+                Log.e(TAG, "WebView error: " + err.getDescription());
+                if (currentReloadAttempts < MAX_RELOAD_ATTEMPTS) {
+                    currentReloadAttempts++;
+                    Log.d(TAG, "Retrying load channel due to error, attempt: " + currentReloadAttempts);
+                    handler.postDelayed(() -> {
+                        webView.reload();
+                    }, 1000);
+                } else {
+                    hideSimpleLoading();
+                    if (isConfigValid) runOnUiThread(MainActivity.this::loadChannelsFromJson);
+                    Toast.makeText(MainActivity.this, "页面加载失败，请重试", Toast.LENGTH_SHORT).show();
+                    currentReloadAttempts = 0;
+                }
             }
         });
 
@@ -265,6 +268,43 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    private void checkVideoElement() {
+        String js = "(function() {" +
+                "  function displayVideo(video) {" +
+                "    document.body.innerHTML = '<div style=\"margin:0;padding:0;width:100%;height:100vh;overflow:hidden;\">' + video.outerHTML + '</div>';" +
+                "    var v = document.querySelector('video');" +
+                "    v.style.cssText = 'width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;z-index:9999;';" +
+                "    v.controls = true;" +
+                "    v.play().then(() => {" +
+                "      if (v.requestFullscreen) v.requestFullscreen();" +
+                "      AndroidBridge.onVideoReady();" +
+                "    }).catch((err) => {" +
+                "      AndroidBridge.onVideoError(err.message);" +
+                "    });" +
+                "  }" +
+                "  var vid = document.querySelector('video');" +
+                "  if (vid) {" +
+                "    displayVideo(vid);" +
+                "  } else {" +
+                "    var attempts = 0;" +
+                "    var maxAttempts = 10;" +
+                "    var observer = new MutationObserver(function() {" +
+                "      var v2 = document.querySelector('video');" +
+                "      if (v2) {" +
+                "        displayVideo(v2);" +
+                "        observer.disconnect();" +
+                "      } else if (attempts >= maxAttempts) {" +
+                "        observer.disconnect();" +
+                "        AndroidBridge.onVideoError('Video element not found after max attempts');" +
+                "      }" +
+                "      attempts++;" +
+                "    });" +
+                "    observer.observe(document.body, { childList: true, subtree: true });" +
+                "  }" +
+                "})();";
+        webView.evaluateJavascript(js, null);
+    }
+
     private String getRandomDesktopUserAgent() {
         return DESKTOP_USER_AGENTS[random.nextInt(DESKTOP_USER_AGENTS.length)];
     }
@@ -277,15 +317,15 @@ public class MainActivity extends AppCompatActivity {
         String ua = getRandomDesktopUserAgent();
         String[] res = getRandomDesktopResolution();
         String script =
-                "(function(){"
-                        + "Object.defineProperty(window.screen,'width',{value:" + res[0] + "});"
-                        + "Object.defineProperty(window.screen,'height',{value:" + res[1] + "});"
-                        + "Object.defineProperty(window.screen,'availWidth',{value:" + res[0] + "});"
-                        + "Object.defineProperty(window.screen,'availHeight',{value:" + (Integer.parseInt(res[1]) - 40) + "});"
-                        + "Object.defineProperty(navigator,'platform',{value:'Win32'});"
-                        + "Object.defineProperty(navigator,'maxTouchPoints',{value:0});"
-                        + "Object.defineProperty(navigator,'userAgent',{value:'" + ua + "'});"
-                        + "window.ontouchstart=undefined;})();";
+                "(function(){" +
+                        "Object.defineProperty(window.screen,'width',{value:" + res[0] + "});" +
+                        "Object.defineProperty(window.screen,'height',{value:" + res[1] + "});" +
+                        "Object.defineProperty(window.screen,'availWidth',{value:" + res[0] + "});" +
+                        "Object.defineProperty(window.screen,'availHeight',{value:" + (Integer.parseInt(res[1]) - 40) + "});" +
+                        "Object.defineProperty(navigator,'platform',{value:'Win32'});" +
+                        "Object.defineProperty(navigator,'maxTouchPoints',{value:0});" +
+                        "Object.defineProperty(navigator,'userAgent',{value:'" + ua + "'});" +
+                        "window.ontouchstart=undefined;})();";
         webView.evaluateJavascript(script, null);
     }
 

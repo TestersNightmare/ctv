@@ -21,6 +21,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.Toast;
+import android.speech.tts.TextToSpeech;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.drawerlayout.widget.DrawerLayout;
@@ -39,6 +40,7 @@ import java.io.InputStreamReader;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Random;
 
 import okhttp3.OkHttpClient;
@@ -93,6 +95,7 @@ public class MainActivity extends AppCompatActivity {
     private static final long VIDEO_CHECK_INTERVAL = 500; // 每500ms检查一次video元素
     private static final int MAX_RELOAD_ATTEMPTS = 3; // 最大重试次数
     private int currentReloadAttempts = 0;
+    private TextToSpeech tts; // TTS 实例
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -102,6 +105,25 @@ public class MainActivity extends AppCompatActivity {
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         gson = new Gson();
 
+        // 初始化 TextToSpeech
+        tts = new TextToSpeech(this, status -> {
+            if (status == TextToSpeech.SUCCESS) {
+                // 设置语言为中文
+                int result = tts.setLanguage(Locale.SIMPLIFIED_CHINESE);
+                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    Log.e(TAG, "TTS: 中文语言不可用");
+                    Toast.makeText(this, "设备不支持中文语音播报", Toast.LENGTH_SHORT).show();
+                } else {
+                    Log.d(TAG, "TTS: 初始化成功");
+                    // 设置语速和音量
+                    tts.setSpeechRate(1.0f); // 正常语速
+                    tts.setPitch(1.0f); // 正常音调
+                }
+            } else {
+                Log.e(TAG, "TTS: 初始化失败，状态码: " + status);
+                Toast.makeText(this, "语音播报初始化失败", Toast.LENGTH_SHORT).show();
+            }
+        });
         initViews();
         initSimpleLoadingLayout();
         setupWebView();
@@ -177,10 +199,12 @@ public class MainActivity extends AppCompatActivity {
         ws.setMediaPlaybackRequiresUserGesture(false);
         ws.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
+        // 随机桌面 UA
         String ua = getRandomDesktopUserAgent();
         ws.setUserAgentString(ua);
         Log.d(TAG, "WebView UA: " + ua);
 
+        // 添加桥接接口，供 JS 播放就绪回调
         webView.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void onVideoReady() {
@@ -228,7 +252,32 @@ public class MainActivity extends AppCompatActivity {
                 super.onPageFinished(v, url);
                 progressBar.setVisibility(View.GONE);
                 setupDesktopEnvironment();
-                checkVideoElement();
+
+                // 注入 JS，等待或立即处理 <video> 元素
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    String js =
+                            "(function(){\n" +
+                                    "  function displayVideo(video){\n" +
+                                    "    document.body.innerHTML = '<div style=\"margin:0;padding:0;width:100%;height:100vh;overflow:hidden;\">'+video.outerHTML+'</div>';\n" +
+                                    "    var v = document.querySelector('video');\n" +
+                                    "    v.style.cssText = 'width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;z-index:9999;';\n" +
+                                    "    v.controls = true;\n" +
+                                    "    v.play();\n" +
+                                    "    if(v.requestFullscreen) v.requestFullscreen();\n" +
+                                    "    AndroidBridge.onVideoReady();\n" +
+                                    "  }\n" +
+                                    "  var vid = document.querySelector('video');\n" +
+                                    "  if(vid) displayVideo(vid);\n" +
+                                    "  else {\n" +
+                                    "    var obs = new MutationObserver(function(){\n" +
+                                    "      var v2 = document.querySelector('video');\n" +
+                                    "      if(v2){ displayVideo(v2); obs.disconnect(); }\n" +
+                                    "    });\n" +
+                                    "    obs.observe(document.body,{ childList:true, subtree:true });\n" +
+                                    "  }\n" +
+                                    "})();";
+                    v.evaluateJavascript(js, null);
+                }, 800);
             }
 
             @Override
@@ -304,7 +353,6 @@ public class MainActivity extends AppCompatActivity {
                 "})();";
         webView.evaluateJavascript(js, null);
     }
-
     private String getRandomDesktopUserAgent() {
         return DESKTOP_USER_AGENTS[random.nextInt(DESKTOP_USER_AGENTS.length)];
     }
@@ -317,15 +365,15 @@ public class MainActivity extends AppCompatActivity {
         String ua = getRandomDesktopUserAgent();
         String[] res = getRandomDesktopResolution();
         String script =
-                "(function(){" +
-                        "Object.defineProperty(window.screen,'width',{value:" + res[0] + "});" +
-                        "Object.defineProperty(window.screen,'height',{value:" + res[1] + "});" +
-                        "Object.defineProperty(window.screen,'availWidth',{value:" + res[0] + "});" +
-                        "Object.defineProperty(window.screen,'availHeight',{value:" + (Integer.parseInt(res[1]) - 40) + "});" +
-                        "Object.defineProperty(navigator,'platform',{value:'Win32'});" +
-                        "Object.defineProperty(navigator,'maxTouchPoints',{value:0});" +
-                        "Object.defineProperty(navigator,'userAgent',{value:'" + ua + "'});" +
-                        "window.ontouchstart=undefined;})();";
+                "(function(){"
+                        + "Object.defineProperty(window.screen,'width',{value:" + res[0] + "});"
+                        + "Object.defineProperty(window.screen,'height',{value:" + res[1] + "});"
+                        + "Object.defineProperty(window.screen,'availWidth',{value:" + res[0] + "});"
+                        + "Object.defineProperty(window.screen,'availHeight',{value:" + (Integer.parseInt(res[1]) - 40) + "});"
+                        + "Object.defineProperty(navigator,'platform',{value:'Win32'});"
+                        + "Object.defineProperty(navigator,'maxTouchPoints',{value:0});"
+                        + "Object.defineProperty(navigator,'userAgent',{value:'" + ua + "'});"
+                        + "window.ontouchstart=undefined;})();";
         webView.evaluateJavascript(script, null);
     }
 
@@ -453,6 +501,15 @@ public class MainActivity extends AppCompatActivity {
     private void onChannelClicked(Channel channel) {
         drawerLayout.closeDrawer(channelList, false);
         showSimpleLoading(channel);
+        // 触发语音播报
+        String channelName = channel.getName() != null ? channel.getName() : "未知频道";
+        String ttsText = "正在播放" + channelName;
+        if (tts != null && tts.isLanguageAvailable(Locale.SIMPLIFIED_CHINESE) >= 0) {
+            tts.speak(ttsText, TextToSpeech.QUEUE_FLUSH, null, null);
+            Log.d(TAG, "TTS: 播报 - " + ttsText);
+        } else {
+            Log.w(TAG, "TTS: 无法播报，语言不可用");
+        }
         loadChannelInBackground(channel);
     }
 
@@ -568,6 +625,12 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         if (webView != null) webView.destroy();
+        // 释放 TTS 资源
+        if (tts != null) {
+            tts.stop();
+            tts.shutdown();
+            Log.d(TAG, "TTS: 已释放资源");
+        }
         super.onDestroy();
     }
 }

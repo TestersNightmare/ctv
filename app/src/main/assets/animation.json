@@ -1,0 +1,26 @@
+#https://www.yangshipin.cn/video/home?vid=<vid>&cid=<cid>
+[
+  {
+    "id": "1",
+    "name": "动画1",
+    "categories":""
+    "cid": "7b48u3kfqvx35m8",
+    "icUrl": "https://jietufengmian.yangshipin.cn/general_cos/coverPic/create_new_pic_vt/20231104/01e02b32fed82cb32b69e97be72dbe69.jpg?imageMogr2/format/jpg/thumbnail/396x",
+    "episodes": [
+      {"id": "", "name": "", "vid": "n000013ths1"},
+    ]
+  },
+  {
+    "id": "2",
+    "name": "动画2",
+    "categories":""
+    "cid": "d5ba6m2m0z9nyt6a",
+    "icUrl":" https://jietufengmian.yangshipin.cn/general_cos/coverPic/create_new_pic_vt/20231104/01e02b32fed82cb32b69e97be72dbe69.jpg?imageMogr2/format/jpg/thumbnail/396x",
+    "episodes": [
+      {"id": "", "name": "第一集上", "vid": "w00000222j7"},
+      {"id": "", "name": "第一集下", "vid": "v000086ro0c"},
+      {"id": "", "name": "第二集上", "vid": "s000039zo1w"},
+      {"id": "", "name": "第二集下", "vid": "a000055hksn"}
+    ]
+  }
+]

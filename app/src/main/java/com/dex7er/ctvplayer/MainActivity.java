@@ -8,6 +8,7 @@ import android.os.Looper;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
@@ -16,12 +17,14 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.Toast;
 import android.speech.tts.TextToSpeech;
+
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.drawerlayout.widget.DrawerLayout;
@@ -33,26 +36,33 @@ import com.google.gson.reflect.TypeToken;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
+import com.bumptech.glide.Glide;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
     private static final String DEFAULT_URL = "https://www.yangshipin.cn/tv/home?pid=600001859";
-    private static final String CHANNELS_URL = "https://gitee.com/magasb/ctvplayer/raw/master/app/src/main/assets/channels.json";
+    private static final String GITHUB_URL = "https://raw.githubusercontent.com/TestersNightmare/ctv/master/app/src/main/assets/channels.json";
+    private static final String GITEE_URL = "https://gitee.com/magasb/ctvplayer/raw/master/app/src/main/assets/channels.json";
     private static final String PREFS_NAME = "CTVPlayerPrefs";
     private static final String CHANNELS_KEY = "channels";
+    private static final String HISTORY_KEY = "play_history";
+    private static final int MAX_HISTORY = 50;
 
     private static final String[] DESKTOP_USER_AGENTS = {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -80,22 +90,26 @@ public class MainActivity extends AppCompatActivity {
     private ProgressBar progressBar;
     private DrawerLayout drawerLayout;
     private RecyclerView channelList;
-
+    private RecyclerView historyList;
     private FrameLayout simpleLoadingLayout;
     private ImageView currentChannelIcon;
     private ProgressBar loadingSpinner;
-
     private List<Channel> channels = new ArrayList<>();
     private List<ChannelGroup> channelGroups = new ArrayList<>();
+    private List<PlayHistory> playHistory = new ArrayList<>();
     private SharedPreferences prefs;
     private Gson gson;
     private boolean isConfigValid = false;
     private Random random = new Random();
     private Handler handler = new Handler(Looper.getMainLooper());
-    private static final long VIDEO_CHECK_INTERVAL = 500; // 每500ms检查一次video元素
-    private static final int MAX_RELOAD_ATTEMPTS = 3; // 最大重试次数
+    private static final long VIDEO_CHECK_INTERVAL = 500;
+    private static final int MAX_RELOAD_ATTEMPTS = 3;
     private int currentReloadAttempts = 0;
-    private TextToSpeech tts; // TTS 实例
+    private TextToSpeech tts;
+    private final OkHttpClient client = new OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .build();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -104,20 +118,18 @@ public class MainActivity extends AppCompatActivity {
 
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         gson = new Gson();
+        loadPlayHistory();
 
-        // 初始化 TextToSpeech
         tts = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS) {
-                // 设置语言为中文
                 int result = tts.setLanguage(Locale.SIMPLIFIED_CHINESE);
                 if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
                     Log.e(TAG, "TTS: 中文语言不可用");
                     Toast.makeText(this, "设备不支持中文语音播报", Toast.LENGTH_SHORT).show();
                 } else {
                     Log.d(TAG, "TTS: 初始化成功");
-                    // 设置语速和音量
-                    tts.setSpeechRate(1.0f); // 正常语速
-                    tts.setPitch(1.0f); // 正常音调
+                    tts.setSpeechRate(1.0f);
+                    tts.setPitch(1.0f);
                 }
             } else {
                 Log.e(TAG, "TTS: 初始化失败，状态码: " + status);
@@ -136,15 +148,25 @@ public class MainActivity extends AppCompatActivity {
         progressBar = findViewById(R.id.progress_bar);
         drawerLayout = findViewById(R.id.drawer_layout);
         channelList = findViewById(R.id.channel_list);
+        historyList = findViewById(R.id.history_list);
 
-        GridLayoutManager gridLayoutManager = new GridLayoutManager(this, 3);
-        gridLayoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
+        GridLayoutManager channelLayoutManager = new GridLayoutManager(this, 3);
+        channelLayoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
             @Override
             public int getSpanSize(int position) {
-                return position == channels.size() ? 3 : 1;
+                return position == 0 ? 3 : 1; // 顶部按钮占满一行
             }
         });
-        channelList.setLayoutManager(gridLayoutManager);
+        channelList.setLayoutManager(channelLayoutManager);
+
+        GridLayoutManager historyLayoutManager = new GridLayoutManager(this, 3);
+        historyLayoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
+            @Override
+            public int getSpanSize(int position) {
+                return 1;
+            }
+        });
+        historyList.setLayoutManager(historyLayoutManager);
     }
 
     private void initSimpleLoadingLayout() {
@@ -199,18 +221,16 @@ public class MainActivity extends AppCompatActivity {
         ws.setMediaPlaybackRequiresUserGesture(false);
         ws.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
-        // 随机桌面 UA
         String ua = getRandomDesktopUserAgent();
         ws.setUserAgentString(ua);
         Log.d(TAG, "WebView UA: " + ua);
 
-        // 添加桥接接口，供 JS 播放就绪回调
         webView.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void onVideoReady() {
                 handler.postDelayed(() -> {
                     hideSimpleLoading();
-                    currentReloadAttempts = 0; // 重置重试计数
+                    currentReloadAttempts = 0;
                 }, 1000);
             }
 
@@ -220,9 +240,7 @@ public class MainActivity extends AppCompatActivity {
                 if (currentReloadAttempts < MAX_RELOAD_ATTEMPTS) {
                     currentReloadAttempts++;
                     Log.d(TAG, "Retrying load channel, attempt: " + currentReloadAttempts);
-                    handler.postDelayed(() -> {
-                        webView.reload(); // 重新加载页面
-                    }, 1000);
+                    handler.postDelayed(() -> webView.reload(), 1000);
                 } else {
                     runOnUiThread(() -> {
                         hideSimpleLoading();
@@ -244,7 +262,7 @@ public class MainActivity extends AppCompatActivity {
             public void onPageStarted(WebView v, String url, android.graphics.Bitmap favicon) {
                 super.onPageStarted(v, url, favicon);
                 setupDesktopEnvironment();
-                currentReloadAttempts = 0; // 重置重试计数
+                currentReloadAttempts = 0;
             }
 
             @Override
@@ -253,7 +271,6 @@ public class MainActivity extends AppCompatActivity {
                 progressBar.setVisibility(View.GONE);
                 setupDesktopEnvironment();
 
-                // 注入 JS，等待或立即处理 <video> 元素
                 new Handler(Looper.getMainLooper()).postDelayed(() -> {
                     String js =
                             "(function(){\n" +
@@ -287,9 +304,7 @@ public class MainActivity extends AppCompatActivity {
                 if (currentReloadAttempts < MAX_RELOAD_ATTEMPTS) {
                     currentReloadAttempts++;
                     Log.d(TAG, "Retrying load channel due to error, attempt: " + currentReloadAttempts);
-                    handler.postDelayed(() -> {
-                        webView.reload();
-                    }, 1000);
+                    handler.postDelayed(() -> webView.reload(), 1000);
                 } else {
                     hideSimpleLoading();
                     if (isConfigValid) runOnUiThread(MainActivity.this::loadChannelsFromJson);
@@ -311,8 +326,18 @@ public class MainActivity extends AppCompatActivity {
         });
 
         webView.loadUrl(DEFAULT_URL);
-        webView.setOnTouchListener((v, ev) -> {
-            drawerLayout.openDrawer(channelList);
+        webView.setOnTouchListener((v, event) -> {
+            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                float x = event.getX();
+                int screenWidth = getResources().getDisplayMetrics().widthPixels;
+                if (x > screenWidth * 0.7f) {
+                    drawerLayout.openDrawer(historyList);
+                    return true;
+                } else if (x < screenWidth * 0.3f) {
+                    drawerLayout.openDrawer(channelList);
+                    return true;
+                }
+            }
             return false;
         });
     }
@@ -353,6 +378,7 @@ public class MainActivity extends AppCompatActivity {
                 "})();";
         webView.evaluateJavascript(js, null);
     }
+
     private String getRandomDesktopUserAgent() {
         return DESKTOP_USER_AGENTS[random.nextInt(DESKTOP_USER_AGENTS.length)];
     }
@@ -378,34 +404,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void loadChannels() {
-        String json = prefs.getString(CHANNELS_KEY, null);
-        if (json != null) {
-            try {
-                channelGroups = ChannelParser.parseGroupedJson(json);
-                if (channelGroups != null && !channelGroups.isEmpty()) {
-                    channels.clear();
-                    for (ChannelGroup g : channelGroups) {
-                        if (g.getChannels() != null) channels.addAll(g.getChannels());
-                    }
-                } else {
-                    Type t = new TypeToken<List<Channel>>(){}.getType();
-                    channels = gson.fromJson(json, t);
-                }
-            } catch (Exception e) {
-                Type t = new TypeToken<List<Channel>>(){}.getType();
-                channels = gson.fromJson(json, t);
-            }
-            if (channels == null) channels = new ArrayList<>();
-            validateChannels();
-        } else {
-            loadChannelsFromConfig();
-        }
+        updateChannels();
     }
 
     private void loadChannelsFromConfig() {
         try {
-            String json = readAssetFile("channels.config");
-            if (json != null) {
+            File configFile = new File(getFilesDir(), "channels.config");
+            if (configFile.exists()) {
+                FileInputStream fis = new FileInputStream(configFile);
+                byte[] buffer = new byte[(int) configFile.length()];
+                fis.read(buffer);
+                fis.close();
+                String json = new String(buffer);
                 channelGroups = ChannelParser.parseGroupedJson(json);
                 if (channelGroups != null && !channelGroups.isEmpty()) {
                     channels.clear();
@@ -419,7 +429,9 @@ public class MainActivity extends AppCompatActivity {
                 validateChannels();
                 return;
             }
-        } catch (IOException ignored) {}
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to load channels.config: " + e.getMessage());
+        }
         loadChannelsFromJson();
     }
 
@@ -469,7 +481,7 @@ public class MainActivity extends AppCompatActivity {
                             .url(c.getUrl())
                             .addHeader("User-Agent", getRandomDesktopUserAgent())
                             .build();
-                    Response resp = new OkHttpClient().newCall(req).execute();
+                    Response resp = client.newCall(req).execute();
                     if (resp.isSuccessful()) {
                         allFailed = false;
                         break;
@@ -488,20 +500,80 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
+// 在 MainActivity.java 的 setupChannelList() 方法中，替换按钮创建部分：
+
     private void setupChannelList() {
-        TwoColumnChannelAdapter adapter = new TwoColumnChannelAdapter(
-                this,
-                channelGroups,
-                this::onChannelClicked,
-                this::updateChannels
-        );
-        channelList.setAdapter(adapter);
+        // 创建按钮容器，使用与频道相同的网格布局样式
+        LinearLayout buttonContainer = new LinearLayout(this);
+        buttonContainer.setOrientation(LinearLayout.HORIZONTAL);
+        buttonContainer.setGravity(Gravity.CENTER);
+        buttonContainer.setPadding(16, 16, 16, 16);
+
+        // 计算每个按钮的大小，参考频道图标的尺寸处理
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        int containerWidth = 300; // drawer宽度300dp转像素
+        int containerWidthPx = (int) (containerWidth * getResources().getDisplayMetrics().density);
+        int buttonSize = (containerWidthPx - 64) / 3; // 减去padding，除以3个按钮
+
+        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(buttonSize, buttonSize);
+        buttonParams.setMargins(10, 8, 10, 8);
+
+        // 历史按钮
+        ImageView historyButton = new ImageView(this);
+        historyButton.setLayoutParams(buttonParams);
+        historyButton.setImageResource(R.drawable.ic_history);
+        historyButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        historyButton.setPadding(4, 4, 4, 4);
+        historyButton.setOnClickListener(v -> drawerLayout.openDrawer(historyList));
+        buttonContainer.addView(historyButton);
+
+        // 更新按钮
+        ImageView updateButton = new ImageView(this);
+        updateButton.setLayoutParams(buttonParams);
+        updateButton.setImageResource(R.drawable.ic_update);
+        updateButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        updateButton.setPadding(4, 4, 4, 4);
+        updateButton.setOnClickListener(v -> updateChannels());
+        buttonContainer.addView(updateButton);
+
+        // 关于按钮
+        ImageView aboutButton = new ImageView(this);
+        aboutButton.setLayoutParams(buttonParams);
+        aboutButton.setImageResource(R.drawable.ic_about);
+        aboutButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        aboutButton.setPadding(4, 4, 4, 4);
+        aboutButton.setOnClickListener(v -> Toast.makeText(this, "CTVPlayer v1.0", Toast.LENGTH_SHORT).show());
+        buttonContainer.addView(aboutButton);
+
+        List<Channel> flatChannels = new ArrayList<>();
+        for (ChannelGroup group : channelGroups) {
+            if (group.getChannels() != null) flatChannels.addAll(group.getChannels());
+        }
+        // 显式声明 ChannelAdapter 类型
+        RecyclerView.Adapter<RecyclerView.ViewHolder> adapter = new ChannelAdapter(this, flatChannels, this::onChannelClicked);
+        channelList.setAdapter(new HeaderFooterAdapter(adapter, buttonContainer, null));
+        setupHistoryList();
+    }
+    private void setupHistoryList() {
+        HistoryAdapter adapter = new HistoryAdapter(this, playHistory, history -> {
+            drawerLayout.closeDrawer(historyList);
+            showSimpleLoading(history);
+            String channelName = history.getName() != null ? history.getName() : "未知频道";
+            String ttsText = "正在播放" + channelName;
+            if (tts != null && tts.isLanguageAvailable(Locale.SIMPLIFIED_CHINESE) >= 0) {
+                tts.speak(ttsText, TextToSpeech.QUEUE_FLUSH, null, null);
+                Log.d(TAG, "TTS: 播报 - " + ttsText);
+            } else {
+                Log.w(TAG, "TTS: 无法播报，语言不可用");
+            }
+            loadChannelInBackground(history);
+        });
+        historyList.setAdapter(adapter);
     }
 
     private void onChannelClicked(Channel channel) {
         drawerLayout.closeDrawer(channelList, false);
         showSimpleLoading(channel);
-        // 触发语音播报
         String channelName = channel.getName() != null ? channel.getName() : "未知频道";
         String ttsText = "正在播放" + channelName;
         if (tts != null && tts.isLanguageAvailable(Locale.SIMPLIFIED_CHINESE) >= 0) {
@@ -510,6 +582,7 @@ public class MainActivity extends AppCompatActivity {
         } else {
             Log.w(TAG, "TTS: 无法播报，语言不可用");
         }
+        addPlayHistory(channel);
         loadChannelInBackground(channel);
     }
 
@@ -519,13 +592,37 @@ public class MainActivity extends AppCompatActivity {
         webView.setVisibility(View.GONE);
     }
 
+    private void showSimpleLoading(PlayHistory history) {
+        loadChannelIcon(currentChannelIcon, history);
+        simpleLoadingLayout.setVisibility(View.VISIBLE);
+        webView.setVisibility(View.GONE);
+    }
+
     private void loadChannelIcon(ImageView iv, Channel channel) {
         String icUrl = channel.getIcUrl();
         if (icUrl != null && !icUrl.isEmpty()) {
             String name = icUrl.substring(icUrl.lastIndexOf('/') + 1).replaceAll("\\..*$", "");
-            int resId = getResources().getIdentifier(name, "mipmap", getPackageName());
-            if (resId == 0) resId = getResources().getIdentifier(name, "drawable", getPackageName());
-            iv.setImageResource(resId != 0 ? resId : R.drawable.ic_tv_default);
+            int resId = getResources().getIdentifier(name, "drawable", getPackageName());
+            if (resId != 0) {
+                iv.setImageResource(resId);
+            } else {
+                Glide.with(this).load(icUrl).error(R.drawable.ic_tv_default).into(iv);
+            }
+        } else {
+            iv.setImageResource(R.drawable.ic_tv_default);
+        }
+    }
+
+    private void loadChannelIcon(ImageView iv, PlayHistory history) {
+        String icUrl = history.getIcUrl();
+        if (icUrl != null && !icUrl.isEmpty()) {
+            String name = icUrl.substring(icUrl.lastIndexOf('/') + 1).replaceAll("\\..*$", "");
+            int resId = getResources().getIdentifier(name, "drawable", getPackageName());
+            if (resId != 0) {
+                iv.setImageResource(resId);
+            } else {
+                Glide.with(this).load(icUrl).error(R.drawable.ic_tv_default).into(iv);
+            }
         } else {
             iv.setImageResource(R.drawable.ic_tv_default);
         }
@@ -542,47 +639,166 @@ public class MainActivity extends AppCompatActivity {
         webView.loadUrl(channel.getUrl());
     }
 
+    private void loadChannelInBackground(PlayHistory history) {
+        if (history.getUrl() == null || history.getUrl().isEmpty()) {
+            hideSimpleLoading();
+            return;
+        }
+        String ua = getRandomDesktopUserAgent();
+        webView.getSettings().setUserAgentString(ua);
+        Log.d(TAG, "Loading history channel with UA: " + ua);
+        webView.loadUrl(history.getUrl());
+    }
+
     private void hideSimpleLoading() {
         simpleLoadingLayout.setVisibility(View.GONE);
         webView.setVisibility(View.VISIBLE);
     }
 
+    private void addPlayHistory(Channel channel) {
+        String url = channel.getUrl();
+        String icUrl = channel.getIcUrl();
+        String name = channel.getName() != null ? channel.getName() : "未知频道";
+        playHistory.add(0, new PlayHistory(url, icUrl, System.currentTimeMillis(), name));
+        if (playHistory.size() > MAX_HISTORY) {
+            playHistory = playHistory.subList(0, MAX_HISTORY);
+        }
+        prefs.edit().putString(HISTORY_KEY, gson.toJson(playHistory)).apply();
+        setupHistoryList();
+    }
+
+    private void loadPlayHistory() {
+        String historyJson = prefs.getString(HISTORY_KEY, null);
+        if (historyJson != null) {
+            Type listType = new TypeToken<List<PlayHistory>>(){}.getType();
+            playHistory = gson.fromJson(historyJson, listType);
+            if (playHistory == null) playHistory = new ArrayList<>();
+            Collections.sort(playHistory, (h1, h2) -> Long.compare(h2.getTimestamp(), h1.getTimestamp()));
+            if (playHistory.size() > MAX_HISTORY) {
+                playHistory = playHistory.subList(0, MAX_HISTORY);
+            }
+        }
+    }
+
     private void updateChannels() {
         Toast.makeText(this, "正在更新频道列表...", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
+            String content = null;
             try {
                 Request req = new Request.Builder()
-                        .url(CHANNELS_URL)
+                        .url(GITHUB_URL)
                         .addHeader("User-Agent", getRandomDesktopUserAgent())
                         .build();
-                Response resp = new OkHttpClient().newCall(req).execute();
+                Response resp = client.newCall(req).execute();
                 if (resp.isSuccessful() && resp.body() != null) {
-                    String content = resp.body().string().trim();
-                    if (content.startsWith("[") && content.endsWith("]")) {
-                        channelGroups = ChannelParser.parseGroupedJson(content);
-                        channels.clear();
-                        for (ChannelGroup g : channelGroups) {
-                            if (g.getChannels() != null) channels.addAll(g.getChannels());
-                        }
-                        prefs.edit().putString(CHANNELS_KEY, content).apply();
-                        saveChannelsToConfig(content);
-                        runOnUiThread(() -> {
-                            setupChannelList();
-                            Toast.makeText(this, "更新成功，共" + channels.size() + "个频道", Toast.LENGTH_SHORT).show();
-                            if (!channels.isEmpty()) onChannelClicked(channels.get(0));
-                        });
-                        return;
+                    content = resp.body().string().trim();
+                    Log.d(TAG, "Fetched from GitHub: " + content);
+                } else {
+                    Log.e(TAG, "GitHub fetch failed, HTTP code: " + (resp != null ? resp.code() : "unknown"));
+                }
+            } catch (IOException e) {
+                Log.e(TAG, "GitHub fetch error: " + e.getMessage());
+            }
+
+            if (content == null) {
+                try {
+                    Request req = new Request.Builder()
+                            .url(GITEE_URL)
+                            .addHeader("User-Agent", getRandomDesktopUserAgent())
+                            .build();
+                    Response resp = client.newCall(req).execute();
+                    if (resp.isSuccessful() && resp.body() != null) {
+                        content = resp.body().string().trim();
+                        Log.d(TAG, "Fetched from Gitee: " + content);
+                    } else {
+                        Log.e(TAG, "Gitee fetch failed, HTTP code: " + (resp != null ? resp.code() : "unknown"));
+                    }
+                } catch (IOException e) {
+                    Log.e(TAG, "Gitee fetch error: " + e.getMessage());
+                }
+            }
+
+            if (content != null && content.startsWith("[") && content.endsWith("]")) {
+                channelGroups = ChannelParser.parseGroupedJson(content);
+                channels.clear();
+                if (channelGroups != null) {
+                    for (ChannelGroup g : channelGroups) {
+                        if (g.getChannels() != null) channels.addAll(g.getChannels());
                     }
                 }
-                runOnUiThread(() ->
-                        Toast.makeText(this, "更新失败：数据格式错误或网络错误", Toast.LENGTH_SHORT).show()
-                );
-            } catch (Exception e) {
-                Log.e(TAG, "Update channels failed", e);
-                runOnUiThread(() ->
-                        Toast.makeText(this, "更新频道列表失败: " + e.getMessage(), Toast.LENGTH_SHORT).show()
-                );
+                if (!channels.isEmpty()) {
+                    prefs.edit().putString(CHANNELS_KEY, content).apply();
+                    saveChannelsToConfig(content);
+                    runOnUiThread(() -> {
+                        setupChannelList();
+                        Toast.makeText(this, "更新成功，共" + channels.size() + "个频道", Toast.LENGTH_SHORT).show();
+                        if (!channels.isEmpty()) onChannelClicked(channels.get(0));
+                    });
+                    return;
+                }
             }
+
+            runOnUiThread(() -> {
+                boolean openChannel = getResources().getBoolean(R.bool.openchannel);
+                if (openChannel) {
+                    String channelsJson = prefs.getString(CHANNELS_KEY, null);
+                    if (channelsJson != null) {
+                        channelGroups = ChannelParser.parseGroupedJson(channelsJson);
+                        channels.clear();
+                        if (channelGroups != null) {
+                            for (ChannelGroup g : channelGroups) {
+                                if (g.getChannels() != null) channels.addAll(g.getChannels());
+                            }
+                        }
+                        if (!channels.isEmpty()) {
+                            Log.d(TAG, "Loaded " + channels.size() + " channels from SharedPreferences (fallback)");
+                            setupChannelList();
+                            onChannelClicked(channels.get(0));
+                            return;
+                        }
+                    }
+                    try {
+                        File configFile = new File(getFilesDir(), "channels.config");
+                        if (configFile.exists()) {
+                            FileInputStream fis = new FileInputStream(configFile);
+                            byte[] buffer = new byte[(int) configFile.length()];
+                            fis.read(buffer);
+                            fis.close();
+                            channelsJson = new String(buffer);
+                            channelGroups = ChannelParser.parseGroupedJson(channelsJson);
+                            channels.clear();
+                            if (channelGroups != null) {
+                                for (ChannelGroup g : channelGroups) {
+                                    if (g.getChannels() != null) channels.addAll(g.getChannels());
+                                }
+                            }
+                            if (!channels.isEmpty()) {
+                                Log.d(TAG, "Loaded " + channels.size() + " channels from channels.config (fallback)");
+                                prefs.edit().putString(CHANNELS_KEY, channelsJson).apply();
+                                setupChannelList();
+                                onChannelClicked(channels.get(0));
+                                return;
+                            }
+                        }
+                    } catch (IOException e) {
+                        Log.e(TAG, "Failed to load channels.config (fallback): " + e.getMessage());
+                    }
+                    loadChannelsFromJson();
+                } else {
+                    String errorMsg = "网络无法接通";
+                    Toast.makeText(this, errorMsg, Toast.LENGTH_LONG).show();
+                    if (tts != null && tts.isLanguageAvailable(Locale.SIMPLIFIED_CHINESE) >= 0) {
+                        tts.speak(errorMsg, TextToSpeech.QUEUE_FLUSH, null, null);
+                        Log.d(TAG, "TTS: 播报 - " + errorMsg);
+                    } else {
+                        Log.w(TAG, "TTS: 无法播报，语言不可用");
+                    }
+                    Log.e(TAG, "All sources failed, openchannel: " + openChannel);
+                    //channels = new ArrayList<>();
+                    //setupChannelList();
+                    //webView.loadUrl(DEFAULT_URL);
+                }
+            });
         }).start();
     }
 
@@ -615,6 +831,8 @@ public class MainActivity extends AppCompatActivity {
     public void onBackPressed() {
         if (drawerLayout.isDrawerOpen(channelList)) {
             drawerLayout.closeDrawer(channelList);
+        } else if (drawerLayout.isDrawerOpen(historyList)) {
+            drawerLayout.closeDrawer(historyList);
         } else if (webView.canGoBack()) {
             webView.goBack();
         } else {
@@ -625,7 +843,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         if (webView != null) webView.destroy();
-        // 释放 TTS 资源
         if (tts != null) {
             tts.stop();
             tts.shutdown();

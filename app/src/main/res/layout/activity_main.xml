@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.drawerlayout.widget.DrawerLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+<androidx.drawerlayout.widget.DrawerLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/drawer_layout"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
@@ -9,32 +9,29 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent">
 
-        <!-- WebView 放在前面，确保 loading_layout 在其上层 -->
         <WebView
             android:id="@+id/webview"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
-        <!-- 顶部进度条 -->
         <ProgressBar
             android:id="@+id/progress_bar"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="top"
-            android:visibility="gone" />
-
-        <!-- 加载界面，确保在 WebView 之后 -->
+            android:layout_gravity="center" />
 
     </FrameLayout>
 
-    <!-- 侧边栏 - 频道列表，调整宽度以适应3列图标 -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/channel_list"
-        android:layout_width="234dp"
+        android:layout_width="300dp"
         android:layout_height="match_parent"
-        android:layout_gravity="start"
-        android:background="#FF1E1E1E"
-        android:padding="8dp" />
+        android:layout_gravity="start" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/history_list"
+        android:layout_width="300dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="end" />
 
 </androidx.drawerlayout.widget.DrawerLayout>

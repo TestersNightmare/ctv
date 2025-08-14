@@ -1,29 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:padding="4dp"
-    android:background="?android:attr/selectableItemBackground">
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="8dp">
 
     <ImageView
         android:id="@+id/channel_icon"
-        android:layout_width="64dp"
-        android:layout_height="64dp"
-        android:layout_gravity="center"
+        android:layout_width="80dp"
+        android:layout_height="80dp"
         android:scaleType="centerInside"
-        android:background="@android:color/transparent"
         android:contentDescription="@string/channel_icon_description" />
 
     <TextView
         android:id="@+id/channel_name"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:textSize="14sp"
+        android:textColor="#FFFFFF"
         android:visibility="gone" />
 
-    <TextView
-        android:id="@+id/channel_name_on_icon"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:visibility="gone" />
-
-</FrameLayout>
+</LinearLayout>

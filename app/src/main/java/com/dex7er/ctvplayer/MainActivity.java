@@ -85,7 +85,8 @@ public class MainActivity extends AppCompatActivity {
             {"5120", "2880"},
             {"1920", "1200"}
     };
-
+    private View aboutPage;
+    private FrameLayout rightDrawerContainer;
     private WebView webView;
     private ProgressBar progressBar;
     private DrawerLayout drawerLayout;
@@ -149,6 +150,8 @@ public class MainActivity extends AppCompatActivity {
         drawerLayout = findViewById(R.id.drawer_layout);
         channelList = findViewById(R.id.channel_list);
         historyList = findViewById(R.id.history_list);
+        aboutPage = findViewById(R.id.about_page);
+        rightDrawerContainer = (FrameLayout) aboutPage.getParent();
 
         GridLayoutManager channelLayoutManager = new GridLayoutManager(this, 3);
         channelLayoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
@@ -524,8 +527,12 @@ public class MainActivity extends AppCompatActivity {
         historyButton.setImageResource(R.drawable.ic_history);
         historyButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
         historyButton.setPadding(4, 4, 4, 4);
-        historyButton.setOnClickListener(v -> drawerLayout.openDrawer(historyList));
+        historyButton.setOnClickListener(v -> {
+            // 切换到历史记录页面
+            showHistoryPage();
+        });
         buttonContainer.addView(historyButton);
+
 
         // 更新按钮
         ImageView updateButton = new ImageView(this);
@@ -542,21 +549,65 @@ public class MainActivity extends AppCompatActivity {
         aboutButton.setImageResource(R.drawable.ic_about);
         aboutButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
         aboutButton.setPadding(4, 4, 4, 4);
-        aboutButton.setOnClickListener(v -> Toast.makeText(this, "CTVPlayer v1.0", Toast.LENGTH_SHORT).show());
+        aboutButton.setOnClickListener(v -> {
+            // 切换到关于页面
+            showAboutPage();
+        });
         buttonContainer.addView(aboutButton);
 
+        // 显式声明 ChannelAdapter 类型
         List<Channel> flatChannels = new ArrayList<>();
         for (ChannelGroup group : channelGroups) {
-            if (group.getChannels() != null) flatChannels.addAll(group.getChannels());
+            if (group.getChannels() != null) {
+                flatChannels.addAll(group.getChannels());
+            }
         }
+
         // 显式声明 ChannelAdapter 类型
         RecyclerView.Adapter<RecyclerView.ViewHolder> adapter = new ChannelAdapter(this, flatChannels, this::onChannelClicked);
         channelList.setAdapter(new HeaderFooterAdapter(adapter, buttonContainer, null));
         setupHistoryList();
     }
+    private void showAboutPage() {
+        if (drawerLayout.isDrawerOpen(rightDrawerContainer)) {
+            // 如果右侧抽屉已打开，检查当前显示的页面
+            if (aboutPage.getVisibility() == View.VISIBLE) {
+                // 如果关于页面已显示，关闭抽屉
+                drawerLayout.closeDrawer(rightDrawerContainer);
+            } else {
+                // 切换到关于页面
+                historyList.setVisibility(View.GONE);
+                aboutPage.setVisibility(View.VISIBLE);
+            }
+        } else {
+            // 打开抽屉并显示关于页面
+            historyList.setVisibility(View.GONE);
+            aboutPage.setVisibility(View.VISIBLE);
+            drawerLayout.openDrawer(rightDrawerContainer);
+        }
+    }
+
+    private void showHistoryPage() {
+        if (drawerLayout.isDrawerOpen(rightDrawerContainer)) {
+            // 如果右侧抽屉已打开，检查当前显示的页面
+            if (historyList.getVisibility() == View.VISIBLE) {
+                // 如果历史页面已显示，关闭抽屉
+                drawerLayout.closeDrawer(rightDrawerContainer);
+            } else {
+                // 切换到历史页面
+                aboutPage.setVisibility(View.GONE);
+                historyList.setVisibility(View.VISIBLE);
+            }
+        } else {
+            // 打开抽屉并显示历史页面
+            aboutPage.setVisibility(View.GONE);
+            historyList.setVisibility(View.VISIBLE);
+            drawerLayout.openDrawer(rightDrawerContainer);
+        }
+    }
     private void setupHistoryList() {
         HistoryAdapter adapter = new HistoryAdapter(this, playHistory, history -> {
-            drawerLayout.closeDrawer(historyList);
+            drawerLayout.closeDrawer(rightDrawerContainer); // 修改这里
             showSimpleLoading(history);
             String channelName = history.getName() != null ? history.getName() : "未知频道";
             String ttsText = "正在播放" + channelName;
@@ -831,8 +882,8 @@ public class MainActivity extends AppCompatActivity {
     public void onBackPressed() {
         if (drawerLayout.isDrawerOpen(channelList)) {
             drawerLayout.closeDrawer(channelList);
-        } else if (drawerLayout.isDrawerOpen(historyList)) {
-            drawerLayout.closeDrawer(historyList);
+        } else if (drawerLayout.isDrawerOpen(rightDrawerContainer)) { // 修改这里
+            drawerLayout.closeDrawer(rightDrawerContainer);
         } else if (webView.canGoBack()) {
             webView.goBack();
         } else {

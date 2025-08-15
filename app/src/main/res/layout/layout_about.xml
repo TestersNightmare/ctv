@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 新建文件：res/layout/layout_about.xml -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="300dp"
+    android:layout_height="match_parent"
+    android:background="#F5F5F5"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center_horizontal">
+
+        <!-- 应用Logo -->
+        <ImageView
+            android:layout_width="180dp"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:src="@mipmap/app_logo"
+            android:scaleType="fitCenter"
+            android:adjustViewBounds="true" />
+
+        <!-- 开发者信息 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="开发者：Dex7er"
+            android:textSize="16sp"
+            android:textColor="#333333"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="dex7erch3n@gmail.com"
+            android:textSize="14sp"
+            android:textColor="#666666"
+            android:layout_marginBottom="24dp" />
+
+        <!-- 下载APK图片和说明 -->
+        <ImageView
+            android:layout_width="180dp"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:src="@drawable/downloadapk"
+            android:scaleType="fitCenter"
+            android:adjustViewBounds="true" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="截图或拍照转发图片给朋友\n扫码下载看电视应用\n免费追剧看新闻看电视"
+            android:textSize="12sp"
+            android:textColor="#666666"
+            android:gravity="center"
+            android:lineSpacingExtra="2dp"
+            android:layout_marginBottom="24dp" />
+
+        <!-- 公众号二维码和说明 -->
+        <ImageView
+            android:layout_width="180dp"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:src="@drawable/qrcode"
+            android:scaleType="fitCenter"
+            android:adjustViewBounds="true" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="微信扫一扫关注公众号\n获取最新可用版本\n以免耽误老人追剧"
+            android:textSize="12sp"
+            android:textColor="#666666"
+            android:gravity="center"
+            android:lineSpacingExtra="2dp"
+            android:layout_marginBottom="24dp" />
+
+        <!-- 打赏码和说明 -->
+        <ImageView
+            android:layout_width="180dp"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:src="@drawable/wepay"
+            android:scaleType="fitCenter"
+            android:adjustViewBounds="true" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="独立开发不易\n且行且珍惜\n如果用得开心\n请我喝杯星巴克吧"
+            android:textSize="12sp"
+            android:textColor="#666666"
+            android:gravity="center"
+            android:lineSpacingExtra="2dp"
+            android:layout_marginBottom="24dp" />
+
+        <!-- 版权声明 -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#E0E0E0"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="CTVPlayer v1.0"
+            android:textSize="14sp"
+            android:textColor="#333333"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="© 2025 Dex7er. All rights reserved."
+            android:textSize="10sp"
+            android:textColor="#999999"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="本应用仅供学习交流使用\n请支持央视频正版内容"
+            android:textSize="10sp"
+            android:textColor="#999999"
+            android:gravity="center"
+            android:lineSpacingExtra="2dp"
+            android:layout_marginBottom="16dp" />
+
+    </LinearLayout>
+
+</ScrollView>

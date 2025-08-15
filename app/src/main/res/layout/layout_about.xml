@@ -51,7 +51,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="截图或拍照转发图片给朋友\n扫码下载看电视应用\n免费追剧看新闻看电视"
+            android:text="截图或拍照转发上方二维码\n扫码下载免费看电视应用\n大家一起乐呵追剧吧"
             android:textSize="12sp"
             android:textColor="#666666"
             android:gravity="center"
@@ -70,7 +70,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="微信扫一扫关注公众号\n获取最新可用版本\n以免耽误老人追剧"
+            android:text="微信扫一扫关注公众号\n获知应用更新信息\n及时升级最新版本\n以免耽误老人追剧"
             android:textSize="12sp"
             android:textColor="#666666"
             android:gravity="center"
@@ -106,7 +106,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="CTVPlayer v1.0"
+            android:text="看电视 | CTVPlayer | v1.0.0"
             android:textSize="14sp"
             android:textColor="#333333"
             android:textStyle="bold"

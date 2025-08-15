@@ -63,7 +63,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String CHANNELS_KEY = "channels";
     private static final String HISTORY_KEY = "play_history";
     private static final int MAX_HISTORY = 50;
-
+    private static final String DEFAULT_URL_KEY = "DEFAULT_URL";
     private static final String[] DESKTOP_USER_AGENTS = {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
@@ -328,13 +328,16 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        webView.loadUrl(DEFAULT_URL);
+        String startUrl = prefs.getString(DEFAULT_URL_KEY, DEFAULT_URL);
+        webView.loadUrl(startUrl);
+
         webView.setOnTouchListener((v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
                 float x = event.getX();
                 int screenWidth = getResources().getDisplayMetrics().widthPixels;
                 if (x > screenWidth * 0.7f) {
-                    drawerLayout.openDrawer(historyList);
+                    // 修改：使用 rightDrawerContainer 而不是 historyList
+                    drawerLayout.openDrawer(rightDrawerContainer);
                     return true;
                 } else if (x < screenWidth * 0.3f) {
                     drawerLayout.openDrawer(channelList);
@@ -343,6 +346,7 @@ public class MainActivity extends AppCompatActivity {
             }
             return false;
         });
+
     }
 
     private void checkVideoElement() {
@@ -710,11 +714,30 @@ public class MainActivity extends AppCompatActivity {
         String url = channel.getUrl();
         String icUrl = channel.getIcUrl();
         String name = channel.getName() != null ? channel.getName() : "未知频道";
+
+        // —— 新增：按频道名称去重，仅保留最新一条 ——
+        for (int i = playHistory.size() - 1; i >= 0; i--) {
+            PlayHistory h = playHistory.get(i);
+            if (h != null && name.equals(h.getName())) {
+                // 如果发现同名记录，移除旧记录
+                playHistory.remove(i);
+            }
+        }
+
+        // 插入最新记录到最前面
         playHistory.add(0, new PlayHistory(url, icUrl, System.currentTimeMillis(), name));
+
+        // 保证历史记录数量不超过 MAX_HISTORY
         if (playHistory.size() > MAX_HISTORY) {
             playHistory = playHistory.subList(0, MAX_HISTORY);
         }
-        prefs.edit().putString(HISTORY_KEY, gson.toJson(playHistory)).apply();
+
+        // 一次性保存到 SharedPreferences
+        prefs.edit()
+                .putString(HISTORY_KEY, gson.toJson(playHistory))
+                .putString(DEFAULT_URL_KEY, url)
+                .apply();
+
         setupHistoryList();
     }
 
@@ -882,7 +905,7 @@ public class MainActivity extends AppCompatActivity {
     public void onBackPressed() {
         if (drawerLayout.isDrawerOpen(channelList)) {
             drawerLayout.closeDrawer(channelList);
-        } else if (drawerLayout.isDrawerOpen(rightDrawerContainer)) { // 修改这里
+        } else if (drawerLayout.isDrawerOpen(rightDrawerContainer)) {
             drawerLayout.closeDrawer(rightDrawerContainer);
         } else if (webView.canGoBack()) {
             webView.goBack();

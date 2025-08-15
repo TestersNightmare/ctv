@@ -22,16 +22,34 @@
 
     </FrameLayout>
 
+    <!-- 频道列表 - 左侧 -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/channel_list"
         android:layout_width="300dp"
         android:layout_height="match_parent"
         android:layout_gravity="start" />
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/history_list"
+    <!-- 右侧容器，包含历史记录和关于页面 -->
+    <FrameLayout
         android:layout_width="300dp"
         android:layout_height="match_parent"
-        android:layout_gravity="end" />
+        android:layout_gravity="end">
+
+        <!-- 历史记录列表 -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/history_list"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="visible" />
+
+        <!-- 关于页面 -->
+        <include
+            android:id="@+id/about_page"
+            layout="@layout/layout_about"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+    </FrameLayout>
 
 </androidx.drawerlayout.widget.DrawerLayout>

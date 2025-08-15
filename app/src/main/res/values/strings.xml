@@ -11,5 +11,5 @@
     <string name="channel_icon_description">频道图标</string>
     <string name="invalid_channel_url">频道地址无效</string>
     <string name="app_background_description">背景图标</string>
-    <bool name="openchannel">true</bool>
+    <bool name="openchannel">false</bool>
 </resources>

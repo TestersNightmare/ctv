@@ -38,7 +38,7 @@ Built as a lightweight Android WebView wrapper APK, SeeTVPlayer leverages web te
 *Playback view with intuitive controls.*
 
 ![Screenshot3](Screenshot3.jpg)  
-*Settings menu for customization.*
+*History menu, Update menu, About menu.*
 
 ## Disclaimer
 

@@ -4,12 +4,12 @@ plugins {
 }
 
 android {
-    compileSdk 36
+    compileSdk 34
     namespace 'com.dex7er.ctvplayer'
     
     defaultConfig {
         applicationId 'com.dex7er.ctvplayer'
-        minSdk 33
+        minSdk 25
         targetSdk 36
         versionCode 1
         versionName "1.0.0"

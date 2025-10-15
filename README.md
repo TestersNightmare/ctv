@@ -4,9 +4,12 @@
 [![Platform: Android](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com/)
 [![Version: 1.0](https://img.shields.io/badge/Version-1.0-blue.svg)](https://github.com/your-repo/SeeTVPlayer/releases)
 
+[English Version (README.en.md)](README.en.md) | [中文版 (README.md)](README.md)
+
 ## 项目概述
 
 SeeTVPlayer 是一款简化的 Android 视频播放器，专为老年人设计，用于观看免费在线电视节目。通过用户友好的界面展示目标网站内容，帮助不熟悉互联网操作的长者轻松享受娱乐。
+
 ![输入图片说明](app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp)
 ## 软件架构
 
@@ -26,10 +29,10 @@ SeeTVPlayer 是一款简化的 Android 视频播放器，专为老年人设计�
 
 ## 界面截图
 
-![Screenshot1](Screenshot1.jpg)  
+![Screenshot1](Screenshot2.jpg)  
 *主界面，展示频道选择。*
 
-![Screenshot2](Screenshot2.jpg)  
+![Screenshot2](Screenshot1.jpg)  
 *播放视图，直观控制。*
 
 ![Screenshot3](Screenshot3.jpg)  
@@ -38,3 +41,7 @@ SeeTVPlayer 是一款简化的 Android 视频播放器，专为老年人设计�
 ## 免责声明
 
 本项目按“现状”提供，不附带任何保证。严禁用于非法活动或商业牟利。开发者对任何误用不承担责任。
+
+
+## License
+Apache-2.0（详见 [LICENSE](LICENSE)）

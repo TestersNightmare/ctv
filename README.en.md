@@ -4,9 +4,14 @@
 [![Platform: Android](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com/)
 [![Version: 1.0](https://img.shields.io/badge/Version-1.0-blue.svg)](https://github.com/your-repo/SeeTVPlayer/releases)
 
+[中文版 (README.md)](README.md) | [English Version (README.en.md)](README.en.md)
+
 ## Overview
 
 SeeTVPlayer is an intuitive Android video player tailored for seniors, simplifying access to free online TV content. By presenting targeted website media in a clean, user-friendly interface, it empowers users who may be less familiar with digital navigation to enjoy seamless entertainment experiences.
+
+
+![输入图片说明](app/src/main/res/mipmap-xxxhdpi/ic_launcher.webp)
 
 ## Software Architecture
 
@@ -26,10 +31,10 @@ Built as a lightweight Android WebView wrapper APK, SeeTVPlayer leverages web te
 
 ## Screenshots
 
-![Screenshot1](Screenshot1.jpg)  
+![Screenshot1](Screenshot2.jpg)  
 *Main interface showcasing channel selection.*
 
-![Screenshot2](Screenshot2.jpg)  
+![Screenshot2](Screenshot1.jpg)  
 *Playback view with intuitive controls.*
 
 ![Screenshot3](Screenshot3.jpg)  
@@ -39,3 +44,5 @@ Built as a lightweight Android WebView wrapper APK, SeeTVPlayer leverages web te
 
 This project is provided "as is" without warranty. It must not be used for illegal activities or commercial exploitation. The developers disclaim any liability for misuse.
 
+## License
+Apache-2.0（see [LICENSE](LICENSE)）

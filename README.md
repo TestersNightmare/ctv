@@ -36,7 +36,7 @@ SeeTVPlayer 是一款简化的 Android 视频播放器，专为老年人设计�
 *播放视图，直观控制。*
 
 ![Screenshot3](Screenshot3.jpg)  
-*设置菜单，自定义选项。*
+*播放记录菜单 更新菜单 关于菜单。*
 
 ## 免责声明
 

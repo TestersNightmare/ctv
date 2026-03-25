@@ -115,6 +115,14 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        
+        // 允许页面延伸到刘海屏/挖孔屏区域 (Android 9.0+)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(lp);
+        }
+        
         setContentView(R.layout.activity_main);
 
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -146,7 +154,9 @@ public class MainActivity extends AppCompatActivity {
 
     private void initViews() {
         webView = findViewById(R.id.webview);
+        webView.setVisibility(View.GONE);
         progressBar = findViewById(R.id.progress_bar);
+        progressBar.setVisibility(View.GONE);
         drawerLayout = findViewById(R.id.drawer_layout);
         channelList = findViewById(R.id.channel_list);
         historyList = findViewById(R.id.history_list);
@@ -184,10 +194,18 @@ public class MainActivity extends AppCompatActivity {
         simpleLoadingLayout.setLayoutParams(new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
-        simpleLoadingLayout.setBackgroundColor(0xCC000000);
-        simpleLoadingLayout.setVisibility(View.GONE);
+        simpleLoadingLayout.setVisibility(View.VISIBLE);
+
+        ImageView adImage = new ImageView(this);
+        adImage.setLayoutParams(new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+        adImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        adImage.setImageResource(R.drawable.ad);
+        simpleLoadingLayout.addView(adImage);
 
         LinearLayout center = new LinearLayout(this);
+        center.setVisibility(View.VISIBLE);
         center.setOrientation(LinearLayout.VERTICAL);
         center.setGravity(Gravity.CENTER);
         FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(
@@ -201,6 +219,7 @@ public class MainActivity extends AppCompatActivity {
         currentChannelIcon.setLayoutParams(ip);
         currentChannelIcon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         currentChannelIcon.setImageResource(R.drawable.ic_tv_default);
+        currentChannelIcon.setVisibility(View.GONE);
 
         loadingSpinner = new ProgressBar(this);
         LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(spinnerSize, spinnerSize);
@@ -231,10 +250,10 @@ public class MainActivity extends AppCompatActivity {
         webView.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void onVideoReady() {
-                handler.postDelayed(() -> {
+                handler.post(() -> {
                     hideSimpleLoading();
                     currentReloadAttempts = 0;
-                }, 1000);
+                });
             }
 
             @JavascriptInterface
@@ -278,13 +297,17 @@ public class MainActivity extends AppCompatActivity {
                     String js =
                             "(function(){\n" +
                                     "  function displayVideo(video){\n" +
-                                    "    document.body.innerHTML = '<div style=\"margin:0;padding:0;width:100%;height:100vh;overflow:hidden;\">'+video.outerHTML+'</div>';\n" +
+                                    "    document.body.innerHTML = '<div style=\"margin:0;padding:0;width:100%;height:100vh;background:#000;overflow:hidden;\">'+video.outerHTML+'</div>';\n" +
                                     "    var v = document.querySelector('video');\n" +
                                     "    v.style.cssText = 'width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;z-index:9999;';\n" +
                                     "    v.controls = true;\n" +
-                                    "    v.play();\n" +
+                                    "    var notifyReady = function() { if(!v.__notified){ AndroidBridge.onVideoReady(); v.__notified = true; } };\n" +
+                                    "    v.addEventListener('playing', notifyReady);\n" +
+                                    "    v.addEventListener('timeupdate', function(){ if(v.currentTime > 0) notifyReady(); });\n" +
+                                    "    setTimeout(notifyReady, 5000);\n" +
+                                    "    var p = v.play();\n" +
+                                    "    if(p !== undefined) { p.catch(function(){}); }\n" +
                                     "    if(v.requestFullscreen) v.requestFullscreen();\n" +
-                                    "    AndroidBridge.onVideoReady();\n" +
                                     "  }\n" +
                                     "  var vid = document.querySelector('video');\n" +
                                     "  if(vid) displayVideo(vid);\n" +
@@ -320,11 +343,7 @@ public class MainActivity extends AppCompatActivity {
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onProgressChanged(WebView v, int newProgress) {
-                if (newProgress == 100) progressBar.setVisibility(View.GONE);
-                else {
-                    progressBar.setVisibility(View.VISIBLE);
-                    progressBar.setProgress(newProgress);
-                }
+                progressBar.setVisibility(View.GONE);
             }
         });
 
@@ -643,12 +662,16 @@ public class MainActivity extends AppCompatActivity {
 
     private void showSimpleLoading(Channel channel) {
         loadChannelIcon(currentChannelIcon, channel);
+        simpleLoadingLayout.animate().cancel();
+        simpleLoadingLayout.setAlpha(1f);
         simpleLoadingLayout.setVisibility(View.VISIBLE);
         webView.setVisibility(View.GONE);
     }
 
     private void showSimpleLoading(PlayHistory history) {
         loadChannelIcon(currentChannelIcon, history);
+        simpleLoadingLayout.animate().cancel();
+        simpleLoadingLayout.setAlpha(1f);
         simpleLoadingLayout.setVisibility(View.VISIBLE);
         webView.setVisibility(View.GONE);
     }
@@ -706,8 +729,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void hideSimpleLoading() {
-        simpleLoadingLayout.setVisibility(View.GONE);
         webView.setVisibility(View.VISIBLE);
+        simpleLoadingLayout.animate()
+                .alpha(0f)
+                .setDuration(500)
+                .withEndAction(() -> {
+                    simpleLoadingLayout.setVisibility(View.GONE);
+                    simpleLoadingLayout.setAlpha(1f);
+                })
+                .start();
     }
 
     private void addPlayHistory(Channel channel) {

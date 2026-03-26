@@ -18,6 +18,7 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -152,6 +153,9 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Keep screen on while app is in foreground
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         // Allow content to extend into notch/cutout area (Android 9+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -1293,6 +1297,9 @@ public class MainActivity extends AppCompatActivity {
 
     /** Shows a dialog suggesting this app be set as the default launcher. */
     private void checkDefaultLauncher() {
+        SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
+        if (prefs.getBoolean("launcher_dialog_dismissed", false)) return;
+
         Intent homeIntent = new Intent(Intent.ACTION_MAIN);
         homeIntent.addCategory(Intent.CATEGORY_HOME);
         ResolveInfo resolveInfo = getPackageManager()
@@ -1304,7 +1311,8 @@ public class MainActivity extends AppCompatActivity {
                     .setTitle("设为默认桌面")
                     .setMessage("将此应用设为默认桌面，打开电视或者平板就可以直接播放上次播放的频道。")
                     .setPositiveButton("去设置", (d, w) -> startActivity(homeIntent))
-                    .setNegativeButton("暂不", null)
+                    .setNegativeButton("暂不", (d, w) ->
+                            prefs.edit().putBoolean("launcher_dialog_dismissed", true).apply())
                     .show();
         }
     }

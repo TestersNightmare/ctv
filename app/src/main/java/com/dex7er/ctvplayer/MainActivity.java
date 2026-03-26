@@ -65,6 +65,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 
+
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
     private static final String DEFAULT_URL = "https://www.yangshipin.cn/tv/home?pid=600001859";
@@ -199,6 +200,8 @@ public class MainActivity extends AppCompatActivity {
 
         // Suggest setting this app as the default launcher
         checkDefaultLauncher();
+
+
     }
 
     private void initViews() {
@@ -1006,6 +1009,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showAboutPage() {
+        // Update version number dynamically
+        TextView tvVersion = aboutPage.findViewById(R.id.tv_version);
+        if (tvVersion != null) {
+            try {
+                String versionName = getPackageManager()
+                        .getPackageInfo(getPackageName(), 0).versionName;
+                tvVersion.setText("看电视 | CTVPlayer | v" + versionName);
+            } catch (PackageManager.NameNotFoundException ignored) {}
+        }
+
         if (drawerLayout.isDrawerOpen(rightDrawerContainer)) {
             if (aboutPage.getVisibility() == View.VISIBLE) {
                 drawerLayout.closeDrawer(rightDrawerContainer);

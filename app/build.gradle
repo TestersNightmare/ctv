@@ -44,4 +44,5 @@ dependencies {
     implementation "com.google.firebase:firebase-analytics"
     implementation "com.google.firebase:firebase-auth"
     implementation "com.google.firebase:firebase-firestore"
+    implementation 'com.onesignal:OneSignal:[5.6.1, 5.9.99]'
 }

@@ -143,6 +143,7 @@ public class MainActivity extends AppCompatActivity {
 
     private CarouselManager carouselManager;
     private boolean isCarouselMode = false;
+    private boolean carouselPendingPermission = false; // 等待权限授予后再启动轮播
 
     /** Overlay shown inside carousel mode when the user presses MENU. */
     private View imageListOverlay;
@@ -667,6 +668,16 @@ public class MainActivity extends AppCompatActivity {
 
     /** Scan images in background and start the fullscreen photo carousel. */
     private void startCarousel() {
+        // 先检查存储权限，没有就先申请，授予后自动继续
+        String perm = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                ? Manifest.permission.READ_MEDIA_IMAGES
+                : Manifest.permission.READ_EXTERNAL_STORAGE;
+        if (ContextCompat.checkSelfPermission(this, perm) != PackageManager.PERMISSION_GRANTED) {
+            carouselPendingPermission = true;
+            ActivityCompat.requestPermissions(this, new String[]{perm}, REQ_STORAGE_PERMISSION);
+            return;
+        }
+
         // Pause video audio
         webView.evaluateJavascript(
             "(function(){var v=document.querySelector('video');if(v)v.pause();})()", null);
@@ -1305,7 +1316,18 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        // Carousel will show a Toast if no images are found due to permission denial
+        if (requestCode == REQ_STORAGE_PERMISSION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                // 权限已授予：如果是轮播触发的申请，继续启动轮播
+                if (carouselPendingPermission) {
+                    carouselPendingPermission = false;
+                    startCarousel();
+                }
+            } else {
+                carouselPendingPermission = false;
+                Toast.makeText(this, "未获得存储权限，无法读取本地图片", Toast.LENGTH_SHORT).show();
+            }
+        }
     }
 
     /** Shows a dialog suggesting this app be set as the default launcher. */

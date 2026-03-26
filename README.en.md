@@ -19,8 +19,10 @@ SeeTVPlayer is an intuitive Android video player tailored for seniors, simplifyi
 v1.0.2：
 
 1. Added remote control support.
+
 2. Added default desktop settings, allowing direct playback upon startup, perfectly restoring the playback experience of older TVs.
-3. Added image carousel screensaver.
+
+3. Added image carousel screensaver. The carousel images need to be placed in the image folder on the local storage or in the default Android image path on the SD card or USB device.
 
 
 ## Software Architecture

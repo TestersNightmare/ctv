@@ -136,6 +136,13 @@ public class CarouselManager {
      * Wide (landscape) images are shown alone; portrait images are paired
      * or tripled until the combined width covers the screen.
      */
+    /**
+     * 分组规则：
+     *  - 宽图（aspect >= 0.9，如 4:3 / 16:9）：永远单张全屏显示。
+     *  - 竖图（aspect <  0.9，如 3:4 / 9:16）：强制从竖图队列中凑 2-3 张并排，
+     *    跳过中间夹杂的宽图（宽图保留在自己的位置单独出现）。
+     *  最终 slide 顺序按原始图片索引大小穿插排列，保持大致时间顺序。
+     */
     private void buildGroups() {
         groups.clear();
         if (images.isEmpty()) return;
@@ -144,34 +151,55 @@ public class CarouselManager {
         int sh = context.getResources().getDisplayMetrics().heightPixels;
         if (sh == 0) sh = 1;
 
-        int pos = 0;
-        while (pos < images.size()) {
-            SlideGroup g = new SlideGroup();
-            g.indices.add(pos);
+        // 按比例分类：竖图 / 宽图
+        List<Integer> portraitQ = new ArrayList<>(); // 竖图原始索引队列
+        List<Integer> wideQ     = new ArrayList<>(); // 宽图原始索引队列
 
-            // Display width if this image fills screen height
-            float displayW0 = images.get(pos).aspectRatio() * sh;
+        for (int i = 0; i < images.size(); i++) {
+            if (images.get(i).aspectRatio() < 0.9f) portraitQ.add(i);
+            else                                     wideQ.add(i);
+        }
 
-            if (displayW0 < sw * 0.85f) {
-                // Portrait/narrow image – try to fill remaining width with next images
-                float total = displayW0;
-                int next = pos + 1;
-                while (next < images.size() && g.indices.size() < 3) {
-                    float wn = images.get(next).aspectRatio() * sh;
-                    if (wn >= sw * 0.85f) break; // next is wide, don't merge
-                    if (total + wn <= sw * 1.15f) {
-                        g.indices.add(next);
-                        total += wn;
-                        next++;
-                        if (total >= sw * 0.85f) break; // filled enough
+        int wi = 0, pi = 0;
+        while (wi < wideQ.size() || pi < portraitQ.size()) {
+
+            // 按原始索引决定谁先出现，保持大致播放顺序
+            boolean pickWide;
+            if      (wi >= wideQ.size())     pickWide = false;
+            else if (pi >= portraitQ.size()) pickWide = true;
+            else                             pickWide = wideQ.get(wi) < portraitQ.get(pi);
+
+            if (pickWide) {
+                // 宽图：单张一组
+                SlideGroup g = new SlideGroup();
+                g.indices.add(wideQ.get(wi++));
+                groups.add(g);
+
+            } else {
+                // 竖图：强制从竖图队列凑 2-3 张
+                SlideGroup g = new SlideGroup();
+                float total = 0f;
+
+                // 先加当前竖图
+                int idx0 = portraitQ.get(pi++);
+                g.indices.add(idx0);
+                total += images.get(idx0).aspectRatio() * sh;
+
+                // 再从竖图队列继续凑（最多凑到 3 张，允许总宽超屏宽 20%）
+                while (pi < portraitQ.size() && g.indices.size() < 3) {
+                    int nextIdx = portraitQ.get(pi);
+                    float nextW = images.get(nextIdx).aspectRatio() * sh;
+                    if (total + nextW <= sw * 1.2f) {
+                        g.indices.add(nextIdx);
+                        total += nextW;
+                        pi++;
                     } else {
-                        break;
+                        break; // 后续竖图加进去会太宽，停止
                     }
                 }
-            }
 
-            groups.add(g);
-            pos += g.indices.size();
+                groups.add(g);
+            }
         }
     }
 

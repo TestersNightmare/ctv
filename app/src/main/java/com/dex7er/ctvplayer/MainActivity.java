@@ -33,7 +33,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 import android.speech.tts.TextToSpeech;
 
-import androidx.appcompat.app.AlertDialog;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -76,8 +76,8 @@ public class MainActivity extends AppCompatActivity {
     private static final String DEFAULT_URL_KEY = "DEFAULT_URL";
     private static final int REQ_STORAGE_PERMISSION = 100;
 
-    /** 暂停超过此时间后自动开始轮播 (5分钟；测试可改为 30_000L) */
-    private static final long PAUSE_TO_CAROUSEL_DELAY = 5 * 60 * 1000L;
+    /** 暂停超过此时间后自动开始轮播 (测试用 10秒，正式改为 5 * 60 * 1000L) */
+    private static final long PAUSE_TO_CAROUSEL_DELAY =  5 * 60 * 1000L;
 
     private static final String[] DESKTOP_USER_AGENTS = {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -286,7 +286,7 @@ public class MainActivity extends AppCompatActivity {
         panel.setPadding(pad, pad, pad, pad);
         panel.setBackgroundColor(0xBB000000);
 
-        int panelWidth = (int) (200 * dp);
+        int panelWidth = (int) (140 * dp);
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 panelWidth, FrameLayout.LayoutParams.WRAP_CONTENT);
         lp.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
@@ -295,16 +295,18 @@ public class MainActivity extends AppCompatActivity {
 
         String[] tips = {
             "⌨  遥控操作指南",
-            "──────────────",
+            "────────",
+            "● 电视直播模式",
             "确认键  播放 / 暂停",
-            "◄ ►   切换频道",
-            "菜单键  频道列表",
-            "主页键  回首页",
             "返回键  退出/返回",
+            "菜单键  频道列表",
+            "主页键  切换首页",
+            "◄ ►键  上/下一频道",
             "",
-            "● 轮播模式",
+            "────────",
+            "● 图片轮播模式",
             "确认键  停止轮播",
-            "◄ ►   上/下一张",
+            "◄ ►键  上/下一张",
             "菜单键  图片列表",
             "返回键  退出轮播"
         };
@@ -961,7 +963,7 @@ public class MainActivity extends AppCompatActivity {
         // ── 轮播按钮（替换原历史按钮） ────────────────────────────────────
         ImageView carouselButton = new ImageView(this);
         carouselButton.setLayoutParams(buttonParams);
-        carouselButton.setImageResource(R.drawable.ic_slideshow);
+        carouselButton.setImageResource(R.drawable.ic_history);
         carouselButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
         carouselButton.setPadding(4, 4, 4, 4);
         carouselButton.setOnClickListener(v -> {
@@ -1297,9 +1299,10 @@ public class MainActivity extends AppCompatActivity {
                 .resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY);
         if (resolveInfo != null &&
                 !getPackageName().equals(resolveInfo.activityInfo.packageName)) {
-            new AlertDialog.Builder(this)
+            new MaterialAlertDialogBuilder(this)
+                    .setIcon(R.mipmap.ic_launcher_round)
                     .setTitle("设为默认桌面")
-                    .setMessage("将此应用设为默认桌面，遥控器主页键可直接回到频道列表。")
+                    .setMessage("将此应用设为默认桌面，打开电视或者平板就可以直接播放上次播放的频道。")
                     .setPositiveButton("去设置", (d, w) -> startActivity(homeIntent))
                     .setNegativeButton("暂不", null)
                     .show();

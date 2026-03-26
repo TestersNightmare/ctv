@@ -1,8 +1,9 @@
 # Android Studio
 *.iml
 .gradle
-.idea
+.idea/
 .claude/
+/gradle
 /buildAndSign.bat
 /local.properties
 /.idea/caches

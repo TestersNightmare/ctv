@@ -1,15 +1,23 @@
 package com.dex7er.ctvplayer;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.graphics.Color;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -17,20 +25,23 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.TextView;
 import android.widget.Toast;
 import android.speech.tts.TextToSpeech;
 
-
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.bumptech.glide.Glide;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 
@@ -52,7 +63,6 @@ import java.util.concurrent.TimeUnit;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
-import com.bumptech.glide.Glide;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
@@ -64,6 +74,11 @@ public class MainActivity extends AppCompatActivity {
     private static final String HISTORY_KEY = "play_history";
     private static final int MAX_HISTORY = 50;
     private static final String DEFAULT_URL_KEY = "DEFAULT_URL";
+    private static final int REQ_STORAGE_PERMISSION = 100;
+
+    /** 暂停超过此时间后自动开始轮播 (5分钟；测试可改为 30_000L) */
+    private static final long PAUSE_TO_CAROUSEL_DELAY = 5 * 60 * 1000L;
+
     private static final String[] DESKTOP_USER_AGENTS = {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
@@ -76,15 +91,12 @@ public class MainActivity extends AppCompatActivity {
     };
 
     private static final String[][] DESKTOP_RESOLUTIONS = {
-            {"1920", "1080"},
-            {"2560", "1440"},
-            {"3440", "1440"},
-            {"3840", "2160"},
-            {"2560", "1600"},
-            {"3840", "1600"},
-            {"5120", "2880"},
-            {"1920", "1200"}
+            {"1920", "1080"}, {"2560", "1440"}, {"3440", "1440"}, {"3840", "2160"},
+            {"2560", "1600"}, {"3840", "1600"}, {"5120", "2880"}, {"1920", "1200"}
     };
+
+    // ─────────────────────────── views ───────────────────────────────────
+
     private View aboutPage;
     private FrameLayout rightDrawerContainer;
     private WebView webView;
@@ -95,6 +107,9 @@ public class MainActivity extends AppCompatActivity {
     private FrameLayout simpleLoadingLayout;
     private ImageView currentChannelIcon;
     private ProgressBar loadingSpinner;
+
+    // ─────────────────────────── data ────────────────────────────────────
+
     private List<Channel> channels = new ArrayList<>();
     private List<ChannelGroup> channelGroups = new ArrayList<>();
     private List<PlayHistory> playHistory = new ArrayList<>();
@@ -112,72 +127,96 @@ public class MainActivity extends AppCompatActivity {
             .readTimeout(10, TimeUnit.SECONDS)
             .build();
 
+    // ─────────────────────────── channel navigation ──────────────────────
+
+    /** Index of currently playing channel within the flat {@code channels} list. */
+    private int currentChannelIndex = -1;
+
+    // ─────────────────────────── video state ─────────────────────────────
+
+    private boolean isVideoPaused = false;
+    private Runnable pauseToCarouselRunnable;
+
+    // ─────────────────────────── carousel ────────────────────────────────
+
+    private CarouselManager carouselManager;
+    private boolean isCarouselMode = false;
+
+    /** Overlay shown inside carousel mode when the user presses MENU. */
+    private View imageListOverlay;
+    private RecyclerView imageListRecycler;
+    private ImageThumbAdapter imageListAdapter;
+
+    // ─────────────────────────── lifecycle ───────────────────────────────
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        
-        // 允许页面延伸到刘海屏/挖孔屏区域 (Android 9.0+)
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+
+        // Allow content to extend into notch/cutout area (Android 9+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
-            lp.layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            lp.layoutInDisplayCutoutMode =
+                    android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
             getWindow().setAttributes(lp);
         }
-        
+
         setContentView(R.layout.activity_main);
 
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        gson = new Gson();
+        gson  = new Gson();
         loadPlayHistory();
 
         tts = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS) {
                 int result = tts.setLanguage(Locale.SIMPLIFIED_CHINESE);
-                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                if (result == TextToSpeech.LANG_MISSING_DATA ||
+                    result == TextToSpeech.LANG_NOT_SUPPORTED) {
                     Log.e(TAG, "TTS: 中文语言不可用");
-                    Toast.makeText(this, "设备不支持中文语音播报", Toast.LENGTH_SHORT).show();
                 } else {
-                    Log.d(TAG, "TTS: 初始化成功");
                     tts.setSpeechRate(1.0f);
                     tts.setPitch(1.0f);
                 }
-            } else {
-                Log.e(TAG, "TTS: 初始化失败，状态码: " + status);
-                Toast.makeText(this, "语音播报初始化失败", Toast.LENGTH_SHORT).show();
             }
         });
+
         initViews();
         initSimpleLoadingLayout();
         setupWebView();
         loadChannels();
         setImmersiveMode();
+
+        // Carousel manager (images are scanned lazily on first start)
+        carouselManager = new CarouselManager(this);
+        carouselManager.setEventListener(() -> isCarouselMode = false);
+
+        // Request storage permission for local image access
+        checkAndRequestStoragePermission();
+
+        // Suggest setting this app as the default launcher
+        checkDefaultLauncher();
     }
 
     private void initViews() {
-        webView = findViewById(R.id.webview);
+        webView    = findViewById(R.id.webview);
         webView.setVisibility(View.GONE);
         progressBar = findViewById(R.id.progress_bar);
         progressBar.setVisibility(View.GONE);
         drawerLayout = findViewById(R.id.drawer_layout);
-        channelList = findViewById(R.id.channel_list);
-        historyList = findViewById(R.id.history_list);
-        aboutPage = findViewById(R.id.about_page);
+        channelList  = findViewById(R.id.channel_list);
+        historyList  = findViewById(R.id.history_list);
+        aboutPage    = findViewById(R.id.about_page);
         rightDrawerContainer = (FrameLayout) aboutPage.getParent();
 
         GridLayoutManager channelLayoutManager = new GridLayoutManager(this, 3);
         channelLayoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
-            @Override
-            public int getSpanSize(int position) {
-                return position == 0 ? 3 : 1; // 顶部按钮占满一行
-            }
+            @Override public int getSpanSize(int position) { return position == 0 ? 3 : 1; }
         });
         channelList.setLayoutManager(channelLayoutManager);
 
         GridLayoutManager historyLayoutManager = new GridLayoutManager(this, 3);
         historyLayoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
-            @Override
-            public int getSpanSize(int position) {
-                return 1;
-            }
+            @Override public int getSpanSize(int position) { return 1; }
         });
         historyList.setLayoutManager(historyLayoutManager);
     }
@@ -186,9 +225,9 @@ public class MainActivity extends AppCompatActivity {
         DisplayMetrics metrics = getResources().getDisplayMetrics();
         int base = Math.min(metrics.widthPixels, metrics.heightPixels);
 
-        int iconSize = (int) (base * 0.35f);
+        int iconSize    = (int) (base * 0.35f);
         int spinnerSize = (int) (base * 0.30f);
-        int iconMargin = (int) (base * 0.05f);
+        int iconMargin  = (int) (base * 0.05f);
 
         simpleLoadingLayout = new FrameLayout(this);
         simpleLoadingLayout.setLayoutParams(new FrameLayout.LayoutParams(
@@ -196,6 +235,7 @@ public class MainActivity extends AppCompatActivity {
                 FrameLayout.LayoutParams.MATCH_PARENT));
         simpleLoadingLayout.setVisibility(View.VISIBLE);
 
+        // Background ad image
         ImageView adImage = new ImageView(this);
         adImage.setLayoutParams(new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -204,8 +244,8 @@ public class MainActivity extends AppCompatActivity {
         adImage.setImageResource(R.drawable.ad);
         simpleLoadingLayout.addView(adImage);
 
+        // Center: channel icon + spinner
         LinearLayout center = new LinearLayout(this);
-        center.setVisibility(View.VISIBLE);
         center.setOrientation(LinearLayout.VERTICAL);
         center.setGravity(Gravity.CENTER);
         FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(
@@ -222,16 +262,69 @@ public class MainActivity extends AppCompatActivity {
         currentChannelIcon.setVisibility(View.GONE);
 
         loadingSpinner = new ProgressBar(this);
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(spinnerSize, spinnerSize);
-        loadingSpinner.setLayoutParams(sp);
+        loadingSpinner.setLayoutParams(new LinearLayout.LayoutParams(spinnerSize, spinnerSize));
 
         center.addView(currentChannelIcon);
         center.addView(loadingSpinner);
         simpleLoadingLayout.addView(center);
 
+        // Right-side remote control guide panel
+        buildRemoteInfoPanel();
+
         FrameLayout mainLayout = findViewById(android.R.id.content);
         mainLayout.addView(simpleLoadingLayout);
     }
+
+    /** Builds and adds a semi-transparent remote-control tips panel to the ad page. */
+    private void buildRemoteInfoPanel() {
+        float dp = getResources().getDisplayMetrics().density;
+        int pad = (int) (14 * dp);
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setGravity(Gravity.START);
+        panel.setPadding(pad, pad, pad, pad);
+        panel.setBackgroundColor(0xBB000000);
+
+        int panelWidth = (int) (200 * dp);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                panelWidth, FrameLayout.LayoutParams.WRAP_CONTENT);
+        lp.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
+        lp.rightMargin = (int) (12 * dp);
+        panel.setLayoutParams(lp);
+
+        String[] tips = {
+            "⌨  遥控操作指南",
+            "──────────────",
+            "确认键  播放 / 暂停",
+            "◄ ►   切换频道",
+            "菜单键  频道列表",
+            "主页键  回首页",
+            "返回键  退出/返回",
+            "",
+            "● 轮播模式",
+            "确认键  停止轮播",
+            "◄ ►   上/下一张",
+            "菜单键  图片列表",
+            "返回键  退出轮播"
+        };
+
+        for (String tip : tips) {
+            TextView tv = new TextView(this);
+            tv.setText(tip);
+            tv.setTextColor(0xFFFFFFFF);
+            tv.setTextSize(tip.startsWith("⌨") ? 14f : 12f);
+            if (tip.startsWith("⌨")) tv.setTypeface(null, android.graphics.Typeface.BOLD);
+            tv.setLayoutParams(new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
+            panel.addView(tv);
+        }
+
+        simpleLoadingLayout.addView(panel);
+    }
+
+    // ─────────────────────────── WebView setup ───────────────────────────
 
     @SuppressLint("SetJavaScriptEnabled")
     private void setupWebView() {
@@ -271,6 +364,24 @@ public class MainActivity extends AppCompatActivity {
                     currentReloadAttempts = 0;
                 }
             }
+
+            /** Called from JS when the video element fires a 'pause' event. */
+            @JavascriptInterface
+            public void onVideoPaused() {
+                handler.post(() -> {
+                    isVideoPaused = true;
+                    startPauseTimer();
+                });
+            }
+
+            /** Called from JS when the video element fires a 'play' or 'playing' event. */
+            @JavascriptInterface
+            public void onVideoPlaying() {
+                handler.post(() -> {
+                    isVideoPaused = false;
+                    cancelPauseTimer();
+                });
+            }
         }, "AndroidBridge");
 
         webView.setWebViewClient(new WebViewClient() {
@@ -295,30 +406,33 @@ public class MainActivity extends AppCompatActivity {
 
                 new Handler(Looper.getMainLooper()).postDelayed(() -> {
                     String js =
-                            "(function(){\n" +
-                                    "  function displayVideo(video){\n" +
-                                    "    document.body.innerHTML = '<div style=\"margin:0;padding:0;width:100%;height:100vh;background:#000;overflow:hidden;\">'+video.outerHTML+'</div>';\n" +
-                                    "    var v = document.querySelector('video');\n" +
-                                    "    v.style.cssText = 'width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;z-index:9999;';\n" +
-                                    "    v.controls = true;\n" +
-                                    "    var notifyReady = function() { if(!v.__notified){ AndroidBridge.onVideoReady(); v.__notified = true; } };\n" +
-                                    "    v.addEventListener('playing', notifyReady);\n" +
-                                    "    v.addEventListener('timeupdate', function(){ if(v.currentTime > 0) notifyReady(); });\n" +
-                                    "    setTimeout(notifyReady, 5000);\n" +
-                                    "    var p = v.play();\n" +
-                                    "    if(p !== undefined) { p.catch(function(){}); }\n" +
-                                    "    if(v.requestFullscreen) v.requestFullscreen();\n" +
-                                    "  }\n" +
-                                    "  var vid = document.querySelector('video');\n" +
-                                    "  if(vid) displayVideo(vid);\n" +
-                                    "  else {\n" +
-                                    "    var obs = new MutationObserver(function(){\n" +
-                                    "      var v2 = document.querySelector('video');\n" +
-                                    "      if(v2){ displayVideo(v2); obs.disconnect(); }\n" +
-                                    "    });\n" +
-                                    "    obs.observe(document.body,{ childList:true, subtree:true });\n" +
-                                    "  }\n" +
-                                    "})();";
+                        "(function(){\n" +
+                        "  function displayVideo(video){\n" +
+                        "    document.body.innerHTML = '<div style=\"margin:0;padding:0;width:100%;height:100vh;background:#000;overflow:hidden;\">'+video.outerHTML+'</div>';\n" +
+                        "    var v = document.querySelector('video');\n" +
+                        "    v.style.cssText = 'width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;z-index:9999;';\n" +
+                        "    v.controls = true;\n" +
+                        "    var notifyReady = function() { if(!v.__notified){ AndroidBridge.onVideoReady(); v.__notified = true; } };\n" +
+                        "    v.addEventListener('playing', notifyReady);\n" +
+                        "    v.addEventListener('timeupdate', function(){ if(v.currentTime > 0) notifyReady(); });\n" +
+                        "    v.addEventListener('pause',   function(){ AndroidBridge.onVideoPaused(); });\n" +
+                        "    v.addEventListener('play',    function(){ AndroidBridge.onVideoPlaying(); });\n" +
+                        "    v.addEventListener('playing', function(){ AndroidBridge.onVideoPlaying(); });\n" +
+                        "    setTimeout(notifyReady, 5000);\n" +
+                        "    var p = v.play();\n" +
+                        "    if(p !== undefined) { p.catch(function(){}); }\n" +
+                        "    if(v.requestFullscreen) v.requestFullscreen();\n" +
+                        "  }\n" +
+                        "  var vid = document.querySelector('video');\n" +
+                        "  if(vid) displayVideo(vid);\n" +
+                        "  else {\n" +
+                        "    var obs = new MutationObserver(function(){\n" +
+                        "      var v2 = document.querySelector('video');\n" +
+                        "      if(v2){ displayVideo(v2); obs.disconnect(); }\n" +
+                        "    });\n" +
+                        "    obs.observe(document.body,{ childList:true, subtree:true });\n" +
+                        "  }\n" +
+                        "})();";
                     v.evaluateJavascript(js, null);
                 }, 800);
             }
@@ -355,7 +469,6 @@ public class MainActivity extends AppCompatActivity {
                 float x = event.getX();
                 int screenWidth = getResources().getDisplayMetrics().widthPixels;
                 if (x > screenWidth * 0.7f) {
-                    // 修改：使用 rightDrawerContainer 而不是 historyList
                     drawerLayout.openDrawer(rightDrawerContainer);
                     return true;
                 } else if (x < screenWidth * 0.3f) {
@@ -365,45 +478,356 @@ public class MainActivity extends AppCompatActivity {
             }
             return false;
         });
-
     }
 
-    private void checkVideoElement() {
-        String js = "(function() {" +
-                "  function displayVideo(video) {" +
-                "    document.body.innerHTML = '<div style=\"margin:0;padding:0;width:100%;height:100vh;overflow:hidden;\">' + video.outerHTML + '</div>';" +
-                "    var v = document.querySelector('video');" +
-                "    v.style.cssText = 'width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;z-index:9999;';" +
-                "    v.controls = true;" +
-                "    v.play().then(() => {" +
-                "      if (v.requestFullscreen) v.requestFullscreen();" +
-                "      AndroidBridge.onVideoReady();" +
-                "    }).catch((err) => {" +
-                "      AndroidBridge.onVideoError(err.message);" +
-                "    });" +
-                "  }" +
-                "  var vid = document.querySelector('video');" +
-                "  if (vid) {" +
-                "    displayVideo(vid);" +
-                "  } else {" +
-                "    var attempts = 0;" +
-                "    var maxAttempts = 10;" +
-                "    var observer = new MutationObserver(function() {" +
-                "      var v2 = document.querySelector('video');" +
-                "      if (v2) {" +
-                "        displayVideo(v2);" +
-                "        observer.disconnect();" +
-                "      } else if (attempts >= maxAttempts) {" +
-                "        observer.disconnect();" +
-                "        AndroidBridge.onVideoError('Video element not found after max attempts');" +
-                "      }" +
-                "      attempts++;" +
-                "    });" +
-                "    observer.observe(document.body, { childList: true, subtree: true });" +
-                "  }" +
-                "})();";
-        webView.evaluateJavascript(js, null);
+    // ─────────────────────────── remote control ──────────────────────────
+
+    /**
+     * Central remote-control dispatcher.
+     * Priority: loading/ad page → image list overlay → carousel mode → drawer open → normal video mode.
+     */
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getAction() != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event);
+
+        int keyCode = event.getKeyCode();
+
+        // ── 1. Loading/ad page stuck – provide escape hatch ───────────────
+        if (simpleLoadingLayout != null &&
+                simpleLoadingLayout.getVisibility() == View.VISIBLE) {
+            switch (keyCode) {
+                case KeyEvent.KEYCODE_BACK:
+                    forceExitLoadingPage();
+                    return true;
+                case KeyEvent.KEYCODE_HOME:
+                    forceExitLoadingPage();
+                    drawerLayout.openDrawer(channelList);
+                    return true;
+                case KeyEvent.KEYCODE_MENU:
+                    forceExitLoadingPage();
+                    drawerLayout.openDrawer(channelList);
+                    return true;
+            }
+        }
+
+        // ── 2. Image list overlay (carousel image-picker sub-menu) ─────────
+        if (imageListOverlay != null) {
+            int cols  = 6;
+            int count = imageListAdapter != null ? imageListAdapter.getItemCount() : 0;
+            int sel   = imageListAdapter != null ? imageListAdapter.getSelectedPos() : 0;
+            switch (keyCode) {
+                case KeyEvent.KEYCODE_DPAD_RIGHT:
+                    if (sel < count - 1) updateImageListSelection(sel + 1);
+                    return true;
+                case KeyEvent.KEYCODE_DPAD_LEFT:
+                    if (sel > 0) updateImageListSelection(sel - 1);
+                    return true;
+                case KeyEvent.KEYCODE_DPAD_DOWN:
+                    if (sel + cols < count) updateImageListSelection(sel + cols);
+                    return true;
+                case KeyEvent.KEYCODE_DPAD_UP:
+                    if (sel - cols >= 0) updateImageListSelection(sel - cols);
+                    return true;
+                case KeyEvent.KEYCODE_DPAD_CENTER:
+                case KeyEvent.KEYCODE_ENTER:
+                    if (carouselManager != null) carouselManager.showImageFromIndex(sel);
+                    hideCarouselImageList();
+                    return true;
+                case KeyEvent.KEYCODE_BACK:
+                case KeyEvent.KEYCODE_MENU:
+                    hideCarouselImageList();
+                    return true;
+            }
+            return true; // consume all other keys while list is open
+        }
+
+        // ── 3. Carousel mode ──────────────────────────────────────────────
+        if (isCarouselMode) {
+            switch (keyCode) {
+                case KeyEvent.KEYCODE_DPAD_LEFT:
+                    if (carouselManager != null) carouselManager.prev();
+                    return true;
+                case KeyEvent.KEYCODE_DPAD_RIGHT:
+                    if (carouselManager != null) carouselManager.next();
+                    return true;
+                case KeyEvent.KEYCODE_DPAD_CENTER:
+                case KeyEvent.KEYCODE_ENTER:
+                    stopCarousel();
+                    return true;
+                case KeyEvent.KEYCODE_MENU:
+                    showCarouselImageList();
+                    return true;
+                case KeyEvent.KEYCODE_BACK:
+                    stopCarousel();
+                    return true;
+                case KeyEvent.KEYCODE_HOME:
+                    stopCarousel();
+                    drawerLayout.openDrawer(channelList);
+                    return true;
+            }
+            return true; // consume unhandled keys in carousel mode
+        }
+
+        // ── 4. Drawer open – let RecyclerView handle D-pad focus natively ─
+        if (drawerLayout.isDrawerOpen(channelList) ||
+                drawerLayout.isDrawerOpen(rightDrawerContainer)) {
+            switch (keyCode) {
+                case KeyEvent.KEYCODE_BACK:
+                    if (drawerLayout.isDrawerOpen(channelList))
+                        drawerLayout.closeDrawer(channelList);
+                    if (drawerLayout.isDrawerOpen(rightDrawerContainer))
+                        drawerLayout.closeDrawer(rightDrawerContainer);
+                    return true;
+                case KeyEvent.KEYCODE_HOME:
+                    drawerLayout.closeDrawer(channelList);
+                    drawerLayout.closeDrawer(rightDrawerContainer);
+                    return true;
+            }
+            return super.dispatchKeyEvent(event); // pass D-pad to RecyclerView items
+        }
+
+        // ── 5. Normal video mode ──────────────────────────────────────────
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_ENTER:
+                toggleVideoPlayPause();
+                return true;
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                playPrevChannel();
+                return true;
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                playNextChannel();
+                return true;
+            case KeyEvent.KEYCODE_MENU:
+                drawerLayout.openDrawer(channelList);
+                return true;
+            case KeyEvent.KEYCODE_HOME:
+                // Open channel list as the app "home page"
+                drawerLayout.openDrawer(channelList);
+                return true;
+        }
+
+        return super.dispatchKeyEvent(event);
     }
+
+    // ─────────────────────────── video controls ──────────────────────────
+
+    private void toggleVideoPlayPause() {
+        webView.evaluateJavascript(
+            "(function(){var v=document.querySelector('video');if(v){if(v.paused)v.play();else v.pause();}})()",
+            null);
+    }
+
+    private void playNextChannel() {
+        if (channels.isEmpty()) return;
+        currentChannelIndex = (currentChannelIndex + 1) % channels.size();
+        onChannelClicked(channels.get(currentChannelIndex));
+    }
+
+    private void playPrevChannel() {
+        if (channels.isEmpty()) return;
+        if (currentChannelIndex < 0) currentChannelIndex = 0;
+        currentChannelIndex = (currentChannelIndex - 1 + channels.size()) % channels.size();
+        onChannelClicked(channels.get(currentChannelIndex));
+    }
+
+    // ─────────────────────────── pause-to-carousel timer ─────────────────
+
+    private void startPauseTimer() {
+        cancelPauseTimer();
+        pauseToCarouselRunnable = () -> {
+            if (isVideoPaused && !isCarouselMode) {
+                // Dismiss stuck loading/ad page first
+                if (simpleLoadingLayout.getVisibility() == View.VISIBLE) {
+                    simpleLoadingLayout.setVisibility(View.GONE);
+                }
+                startCarousel();
+            }
+        };
+        handler.postDelayed(pauseToCarouselRunnable, PAUSE_TO_CAROUSEL_DELAY);
+    }
+
+    private void cancelPauseTimer() {
+        if (pauseToCarouselRunnable != null) {
+            handler.removeCallbacks(pauseToCarouselRunnable);
+            pauseToCarouselRunnable = null;
+        }
+    }
+
+    // ─────────────────────────── carousel ────────────────────────────────
+
+    /** Scan images in background and start the fullscreen photo carousel. */
+    private void startCarousel() {
+        // Pause video audio
+        webView.evaluateJavascript(
+            "(function(){var v=document.querySelector('video');if(v)v.pause();})()", null);
+        cancelPauseTimer();
+        isCarouselMode = true;
+
+        new Thread(() -> {
+            carouselManager.scanImages(); // MediaStore scan (off main thread)
+            runOnUiThread(() -> {
+                if (carouselManager.getImages().isEmpty()) {
+                    Toast.makeText(this, "未在 DCIM / 图片 / 截图 找到图片", Toast.LENGTH_SHORT).show();
+                    isCarouselMode = false;
+                    return;
+                }
+                FrameLayout mainLayout = findViewById(android.R.id.content);
+                carouselManager.start(mainLayout, 0);
+            });
+        }).start();
+    }
+
+    /** Stop the carousel and resume video playback. */
+    private void stopCarousel() {
+        if (carouselManager != null && carouselManager.isRunning()) {
+            carouselManager.stop();
+        }
+        isCarouselMode = false;
+        hideCarouselImageList();
+        // Resume video
+        webView.evaluateJavascript(
+            "(function(){var v=document.querySelector('video');if(v)v.play();})()", null);
+    }
+
+    // ─────────────────────────── carousel image list ─────────────────────
+
+    private void showCarouselImageList() {
+        if (imageListOverlay != null || carouselManager == null) return;
+        List<CarouselManager.ImageItem> images = carouselManager.getImages();
+        if (images.isEmpty()) return;
+
+        FrameLayout mainLayout = findViewById(android.R.id.content);
+        float dp       = getResources().getDisplayMetrics().density;
+        int thumbSize  = (int) (100 * dp);
+        int pad        = (int) (12 * dp);
+        int topMargin  = getResources().getDisplayMetrics().heightPixels / 3;
+
+        FrameLayout overlay = new FrameLayout(this);
+        overlay.setBackgroundColor(0xCC000000);
+        overlay.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+
+        RecyclerView rv = new RecyclerView(this);
+        FrameLayout.LayoutParams rvLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT);
+        rvLp.topMargin = topMargin;
+        rv.setLayoutParams(rvLp);
+        rv.setPadding(pad, pad, pad, pad);
+        rv.setClipToPadding(false);
+        rv.setLayoutManager(new GridLayoutManager(this, 6));
+
+        imageListAdapter = new ImageThumbAdapter(images, thumbSize);
+        rv.setAdapter(imageListAdapter);
+
+        overlay.addView(rv);
+        mainLayout.addView(overlay);
+
+        imageListOverlay  = overlay;
+        imageListRecycler = rv;
+        imageListAdapter.setSelected(0);
+    }
+
+    private void hideCarouselImageList() {
+        if (imageListOverlay != null) {
+            ViewGroup parent = (ViewGroup) imageListOverlay.getParent();
+            if (parent != null) parent.removeView(imageListOverlay);
+            imageListOverlay  = null;
+            imageListRecycler = null;
+            imageListAdapter  = null;
+        }
+    }
+
+    private void updateImageListSelection(int newPos) {
+        if (imageListAdapter == null || imageListRecycler == null) return;
+        imageListAdapter.setSelected(newPos);
+        imageListRecycler.scrollToPosition(newPos);
+    }
+
+    // ─────────────────────────── image thumb adapter ─────────────────────
+
+    private class ImageThumbAdapter extends RecyclerView.Adapter<ImageThumbAdapter.VH> {
+
+        private final List<CarouselManager.ImageItem> items;
+        private final int thumbSize;
+        private int selectedPos = 0;
+
+        ImageThumbAdapter(List<CarouselManager.ImageItem> items, int thumbSize) {
+            this.items    = items;
+            this.thumbSize = thumbSize;
+        }
+
+        void setSelected(int pos) {
+            int old = selectedPos;
+            selectedPos = pos;
+            notifyItemChanged(old);
+            notifyItemChanged(selectedPos);
+        }
+
+        int getSelectedPos() { return selectedPos; }
+
+        @Override
+        public VH onCreateViewHolder(ViewGroup parent, int viewType) {
+            FrameLayout fl = new FrameLayout(MainActivity.this);
+            fl.setLayoutParams(new RecyclerView.LayoutParams(thumbSize, thumbSize));
+            fl.setPadding(3, 3, 3, 3);
+            ImageView iv = new ImageView(MainActivity.this);
+            iv.setLayoutParams(new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT));
+            iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            fl.addView(iv);
+            return new VH(fl);
+        }
+
+        @Override
+        public void onBindViewHolder(VH holder, int pos) {
+            FrameLayout fl = (FrameLayout) holder.itemView;
+            ImageView iv  = (ImageView) fl.getChildAt(0);
+            Glide.with(MainActivity.this)
+                    .load(items.get(pos).uri)
+                    .thumbnail(0.15f)
+                    .into(iv);
+            fl.setBackgroundColor(pos == selectedPos ? 0xFF2196F3 : Color.TRANSPARENT);
+            fl.setOnClickListener(v -> {
+                if (carouselManager != null) carouselManager.showImageFromIndex(pos);
+                hideCarouselImageList();
+            });
+        }
+
+        @Override public int getItemCount() { return items.size(); }
+
+        class VH extends RecyclerView.ViewHolder { VH(View v) { super(v); } }
+    }
+
+    // ─────────────────────────── loading page helpers ────────────────────
+
+    /**
+     * Immediately hides the ad/loading page without animation.
+     * Escape hatch when the page is stuck (e.g., network failure).
+     */
+    private void forceExitLoadingPage() {
+        simpleLoadingLayout.animate().cancel();
+        simpleLoadingLayout.setAlpha(1f);
+        simpleLoadingLayout.setVisibility(View.GONE);
+        webView.setVisibility(View.VISIBLE);
+    }
+
+    private void hideSimpleLoading() {
+        webView.setVisibility(View.VISIBLE);
+        simpleLoadingLayout.animate()
+                .alpha(0f)
+                .setDuration(500)
+                .withEndAction(() -> {
+                    simpleLoadingLayout.setVisibility(View.GONE);
+                    simpleLoadingLayout.setAlpha(1f);
+                })
+                .start();
+    }
+
+    // ─────────────────────────── desktop env helpers ──────────────────────
 
     private String getRandomDesktopUserAgent() {
         return DESKTOP_USER_AGENTS[random.nextInt(DESKTOP_USER_AGENTS.length)];
@@ -418,16 +842,18 @@ public class MainActivity extends AppCompatActivity {
         String[] res = getRandomDesktopResolution();
         String script =
                 "(function(){"
-                        + "Object.defineProperty(window.screen,'width',{value:" + res[0] + "});"
-                        + "Object.defineProperty(window.screen,'height',{value:" + res[1] + "});"
-                        + "Object.defineProperty(window.screen,'availWidth',{value:" + res[0] + "});"
-                        + "Object.defineProperty(window.screen,'availHeight',{value:" + (Integer.parseInt(res[1]) - 40) + "});"
-                        + "Object.defineProperty(navigator,'platform',{value:'Win32'});"
-                        + "Object.defineProperty(navigator,'maxTouchPoints',{value:0});"
-                        + "Object.defineProperty(navigator,'userAgent',{value:'" + ua + "'});"
-                        + "window.ontouchstart=undefined;})();";
+                + "Object.defineProperty(window.screen,'width',{value:" + res[0] + "});"
+                + "Object.defineProperty(window.screen,'height',{value:" + res[1] + "});"
+                + "Object.defineProperty(window.screen,'availWidth',{value:" + res[0] + "});"
+                + "Object.defineProperty(window.screen,'availHeight',{value:" + (Integer.parseInt(res[1]) - 40) + "});"
+                + "Object.defineProperty(navigator,'platform',{value:'Win32'});"
+                + "Object.defineProperty(navigator,'maxTouchPoints',{value:0});"
+                + "Object.defineProperty(navigator,'userAgent',{value:'" + ua + "'});"
+                + "window.ontouchstart=undefined;})();";
         webView.evaluateJavascript(script, null);
     }
+
+    // ─────────────────────────── channel list setup ───────────────────────
 
     private void loadChannels() {
         updateChannels();
@@ -445,9 +871,8 @@ public class MainActivity extends AppCompatActivity {
                 channelGroups = ChannelParser.parseGroupedJson(json);
                 if (channelGroups != null && !channelGroups.isEmpty()) {
                     channels.clear();
-                    for (ChannelGroup g : channelGroups) {
+                    for (ChannelGroup g : channelGroups)
                         if (g.getChannels() != null) channels.addAll(g.getChannels());
-                    }
                 } else {
                     channels = ChannelParser.parseJson(json);
                 }
@@ -468,9 +893,8 @@ public class MainActivity extends AppCompatActivity {
                 channelGroups = ChannelParser.parseGroupedJson(json);
                 if (channelGroups != null && !channelGroups.isEmpty()) {
                     channels.clear();
-                    for (ChannelGroup g : channelGroups) {
+                    for (ChannelGroup g : channelGroups)
                         if (g.getChannels() != null) channels.addAll(g.getChannels());
-                    }
                 } else {
                     channels = ChannelParser.parseJson(json);
                 }
@@ -508,10 +932,7 @@ public class MainActivity extends AppCompatActivity {
                             .addHeader("User-Agent", getRandomDesktopUserAgent())
                             .build();
                     Response resp = client.newCall(req).execute();
-                    if (resp.isSuccessful()) {
-                        allFailed = false;
-                        break;
-                    }
+                    if (resp.isSuccessful()) { allFailed = false; break; }
                 } catch (IOException ignored) {}
             }
             if (allFailed && isConfigValid) runOnUiThread(this::loadChannelsFromJson);
@@ -526,38 +947,30 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
-// 在 MainActivity.java 的 setupChannelList() 方法中，替换按钮创建部分：
-
     private void setupChannelList() {
-        // 创建按钮容器，使用与频道相同的网格布局样式
         LinearLayout buttonContainer = new LinearLayout(this);
         buttonContainer.setOrientation(LinearLayout.HORIZONTAL);
         buttonContainer.setGravity(Gravity.CENTER);
         buttonContainer.setPadding(16, 16, 16, 16);
 
-        // 计算每个按钮的大小，参考频道图标的尺寸处理
-        int screenWidth = getResources().getDisplayMetrics().widthPixels;
-        int containerWidth = 300; // drawer宽度300dp转像素
-        int containerWidthPx = (int) (containerWidth * getResources().getDisplayMetrics().density);
-        int buttonSize = (containerWidthPx - 64) / 3; // 减去padding，除以3个按钮
-
+        int containerWidthPx = (int) (300 * getResources().getDisplayMetrics().density);
+        int buttonSize = (containerWidthPx - 64) / 3;
         LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(buttonSize, buttonSize);
         buttonParams.setMargins(10, 8, 10, 8);
 
-        // 历史按钮
-        ImageView historyButton = new ImageView(this);
-        historyButton.setLayoutParams(buttonParams);
-        historyButton.setImageResource(R.drawable.ic_history);
-        historyButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        historyButton.setPadding(4, 4, 4, 4);
-        historyButton.setOnClickListener(v -> {
-            // 切换到历史记录页面
-            showHistoryPage();
+        // ── 轮播按钮（替换原历史按钮） ────────────────────────────────────
+        ImageView carouselButton = new ImageView(this);
+        carouselButton.setLayoutParams(buttonParams);
+        carouselButton.setImageResource(R.drawable.ic_slideshow);
+        carouselButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        carouselButton.setPadding(4, 4, 4, 4);
+        carouselButton.setOnClickListener(v -> {
+            drawerLayout.closeDrawer(channelList, false);
+            startCarousel();
         });
-        buttonContainer.addView(historyButton);
+        buttonContainer.addView(carouselButton);
 
-
-        // 更新按钮
+        // ── 更新按钮 ──────────────────────────────────────────────────────
         ImageView updateButton = new ImageView(this);
         updateButton.setLayoutParams(buttonParams);
         updateButton.setImageResource(R.drawable.ic_update);
@@ -566,44 +979,35 @@ public class MainActivity extends AppCompatActivity {
         updateButton.setOnClickListener(v -> updateChannels());
         buttonContainer.addView(updateButton);
 
-        // 关于按钮
+        // ── 关于按钮 ──────────────────────────────────────────────────────
         ImageView aboutButton = new ImageView(this);
         aboutButton.setLayoutParams(buttonParams);
         aboutButton.setImageResource(R.drawable.ic_about);
         aboutButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
         aboutButton.setPadding(4, 4, 4, 4);
-        aboutButton.setOnClickListener(v -> {
-            // 切换到关于页面
-            showAboutPage();
-        });
+        aboutButton.setOnClickListener(v -> showAboutPage());
         buttonContainer.addView(aboutButton);
 
-        // 显式声明 ChannelAdapter 类型
+        // Flat channel list for adapter
         List<Channel> flatChannels = new ArrayList<>();
-        for (ChannelGroup group : channelGroups) {
-            if (group.getChannels() != null) {
-                flatChannels.addAll(group.getChannels());
-            }
-        }
+        for (ChannelGroup group : channelGroups)
+            if (group.getChannels() != null) flatChannels.addAll(group.getChannels());
 
-        // 显式声明 ChannelAdapter 类型
-        RecyclerView.Adapter<RecyclerView.ViewHolder> adapter = new ChannelAdapter(this, flatChannels, this::onChannelClicked);
+        RecyclerView.Adapter<RecyclerView.ViewHolder> adapter =
+                new ChannelAdapter(this, flatChannels, this::onChannelClicked);
         channelList.setAdapter(new HeaderFooterAdapter(adapter, buttonContainer, null));
         setupHistoryList();
     }
+
     private void showAboutPage() {
         if (drawerLayout.isDrawerOpen(rightDrawerContainer)) {
-            // 如果右侧抽屉已打开，检查当前显示的页面
             if (aboutPage.getVisibility() == View.VISIBLE) {
-                // 如果关于页面已显示，关闭抽屉
                 drawerLayout.closeDrawer(rightDrawerContainer);
             } else {
-                // 切换到关于页面
                 historyList.setVisibility(View.GONE);
                 aboutPage.setVisibility(View.VISIBLE);
             }
         } else {
-            // 打开抽屉并显示关于页面
             historyList.setVisibility(View.GONE);
             aboutPage.setVisibility(View.VISIBLE);
             drawerLayout.openDrawer(rightDrawerContainer);
@@ -612,52 +1016,47 @@ public class MainActivity extends AppCompatActivity {
 
     private void showHistoryPage() {
         if (drawerLayout.isDrawerOpen(rightDrawerContainer)) {
-            // 如果右侧抽屉已打开，检查当前显示的页面
             if (historyList.getVisibility() == View.VISIBLE) {
-                // 如果历史页面已显示，关闭抽屉
                 drawerLayout.closeDrawer(rightDrawerContainer);
             } else {
-                // 切换到历史页面
                 aboutPage.setVisibility(View.GONE);
                 historyList.setVisibility(View.VISIBLE);
             }
         } else {
-            // 打开抽屉并显示历史页面
             aboutPage.setVisibility(View.GONE);
             historyList.setVisibility(View.VISIBLE);
             drawerLayout.openDrawer(rightDrawerContainer);
         }
     }
+
     private void setupHistoryList() {
         HistoryAdapter adapter = new HistoryAdapter(this, playHistory, history -> {
-            drawerLayout.closeDrawer(rightDrawerContainer); // 修改这里
+            drawerLayout.closeDrawer(rightDrawerContainer);
             showSimpleLoading(history);
-            String channelName = history.getName() != null ? history.getName() : "未知频道";
-            String ttsText = "正在播放" + channelName;
-            if (tts != null && tts.isLanguageAvailable(Locale.SIMPLIFIED_CHINESE) >= 0) {
-                tts.speak(ttsText, TextToSpeech.QUEUE_FLUSH, null, null);
-                Log.d(TAG, "TTS: 播报 - " + ttsText);
-            } else {
-                Log.w(TAG, "TTS: 无法播报，语言不可用");
-            }
+            speakChannelName(history.getName());
             loadChannelInBackground(history);
         });
         historyList.setAdapter(adapter);
     }
 
+    // ─────────────────────────── channel click / loading ─────────────────
+
     private void onChannelClicked(Channel channel) {
+        currentChannelIndex = channels.indexOf(channel);
         drawerLayout.closeDrawer(channelList, false);
         showSimpleLoading(channel);
-        String channelName = channel.getName() != null ? channel.getName() : "未知频道";
+        speakChannelName(channel.getName());
+        addPlayHistory(channel);
+        loadChannelInBackground(channel);
+    }
+
+    private void speakChannelName(String name) {
+        String channelName = name != null ? name : "未知频道";
         String ttsText = "正在播放" + channelName;
         if (tts != null && tts.isLanguageAvailable(Locale.SIMPLIFIED_CHINESE) >= 0) {
             tts.speak(ttsText, TextToSpeech.QUEUE_FLUSH, null, null);
-            Log.d(TAG, "TTS: 播报 - " + ttsText);
-        } else {
-            Log.w(TAG, "TTS: 无法播报，语言不可用");
+            Log.d(TAG, "TTS: " + ttsText);
         }
-        addPlayHistory(channel);
-        loadChannelInBackground(channel);
     }
 
     private void showSimpleLoading(Channel channel) {
@@ -681,11 +1080,8 @@ public class MainActivity extends AppCompatActivity {
         if (icUrl != null && !icUrl.isEmpty()) {
             String name = icUrl.substring(icUrl.lastIndexOf('/') + 1).replaceAll("\\..*$", "");
             int resId = getResources().getIdentifier(name, "drawable", getPackageName());
-            if (resId != 0) {
-                iv.setImageResource(resId);
-            } else {
-                Glide.with(this).load(icUrl).error(R.drawable.ic_tv_default).into(iv);
-            }
+            if (resId != 0) iv.setImageResource(resId);
+            else Glide.with(this).load(icUrl).error(R.drawable.ic_tv_default).into(iv);
         } else {
             iv.setImageResource(R.drawable.ic_tv_default);
         }
@@ -696,78 +1092,46 @@ public class MainActivity extends AppCompatActivity {
         if (icUrl != null && !icUrl.isEmpty()) {
             String name = icUrl.substring(icUrl.lastIndexOf('/') + 1).replaceAll("\\..*$", "");
             int resId = getResources().getIdentifier(name, "drawable", getPackageName());
-            if (resId != 0) {
-                iv.setImageResource(resId);
-            } else {
-                Glide.with(this).load(icUrl).error(R.drawable.ic_tv_default).into(iv);
-            }
+            if (resId != 0) iv.setImageResource(resId);
+            else Glide.with(this).load(icUrl).error(R.drawable.ic_tv_default).into(iv);
         } else {
             iv.setImageResource(R.drawable.ic_tv_default);
         }
     }
 
     private void loadChannelInBackground(Channel channel) {
-        if (channel.getUrl() == null || channel.getUrl().isEmpty()) {
-            hideSimpleLoading();
-            return;
-        }
-        String ua = getRandomDesktopUserAgent();
-        webView.getSettings().setUserAgentString(ua);
-        Log.d(TAG, "Loading channel with UA: " + ua);
+        if (channel.getUrl() == null || channel.getUrl().isEmpty()) { hideSimpleLoading(); return; }
+        webView.getSettings().setUserAgentString(getRandomDesktopUserAgent());
+        Log.d(TAG, "Loading channel: " + channel.getName());
         webView.loadUrl(channel.getUrl());
     }
 
     private void loadChannelInBackground(PlayHistory history) {
-        if (history.getUrl() == null || history.getUrl().isEmpty()) {
-            hideSimpleLoading();
-            return;
-        }
-        String ua = getRandomDesktopUserAgent();
-        webView.getSettings().setUserAgentString(ua);
-        Log.d(TAG, "Loading history channel with UA: " + ua);
+        if (history.getUrl() == null || history.getUrl().isEmpty()) { hideSimpleLoading(); return; }
+        webView.getSettings().setUserAgentString(getRandomDesktopUserAgent());
+        Log.d(TAG, "Loading history channel: " + history.getName());
         webView.loadUrl(history.getUrl());
     }
 
-    private void hideSimpleLoading() {
-        webView.setVisibility(View.VISIBLE);
-        simpleLoadingLayout.animate()
-                .alpha(0f)
-                .setDuration(500)
-                .withEndAction(() -> {
-                    simpleLoadingLayout.setVisibility(View.GONE);
-                    simpleLoadingLayout.setAlpha(1f);
-                })
-                .start();
-    }
+    // ─────────────────────────── history ─────────────────────────────────
 
     private void addPlayHistory(Channel channel) {
-        String url = channel.getUrl();
+        String url   = channel.getUrl();
         String icUrl = channel.getIcUrl();
-        String name = channel.getName() != null ? channel.getName() : "未知频道";
+        String name  = channel.getName() != null ? channel.getName() : "未知频道";
 
-        // —— 新增：按频道名称去重，仅保留最新一条 ——
         for (int i = playHistory.size() - 1; i >= 0; i--) {
             PlayHistory h = playHistory.get(i);
-            if (h != null && name.equals(h.getName())) {
-                // 如果发现同名记录，移除旧记录
-                playHistory.remove(i);
-            }
+            if (h != null && name.equals(h.getName())) playHistory.remove(i);
         }
-
-        // 插入最新记录到最前面
         playHistory.add(0, new PlayHistory(url, icUrl, System.currentTimeMillis(), name));
-
-        // 保证历史记录数量不超过 MAX_HISTORY
-        if (playHistory.size() > MAX_HISTORY) {
+        if (playHistory.size() > MAX_HISTORY)
             playHistory = playHistory.subList(0, MAX_HISTORY);
-        }
 
-        // 一次性保存到 SharedPreferences
         prefs.edit()
                 .putString(HISTORY_KEY, gson.toJson(playHistory))
                 .putString(DEFAULT_URL_KEY, url)
                 .apply();
-
         setupHistoryList();
     }
 
@@ -777,28 +1141,28 @@ public class MainActivity extends AppCompatActivity {
             Type listType = new TypeToken<List<PlayHistory>>(){}.getType();
             playHistory = gson.fromJson(historyJson, listType);
             if (playHistory == null) playHistory = new ArrayList<>();
-            Collections.sort(playHistory, (h1, h2) -> Long.compare(h2.getTimestamp(), h1.getTimestamp()));
-            if (playHistory.size() > MAX_HISTORY) {
+            Collections.sort(playHistory,
+                    (h1, h2) -> Long.compare(h2.getTimestamp(), h1.getTimestamp()));
+            if (playHistory.size() > MAX_HISTORY)
                 playHistory = playHistory.subList(0, MAX_HISTORY);
-            }
         }
     }
+
+    // ─────────────────────────── remote channel update ───────────────────
 
     private void updateChannels() {
         Toast.makeText(this, "正在更新频道列表...", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             String content = null;
             try {
-                Request req = new Request.Builder()
-                        .url(GITHUB_URL)
-                        .addHeader("User-Agent", getRandomDesktopUserAgent())
-                        .build();
+                Request req = new Request.Builder().url(GITHUB_URL)
+                        .addHeader("User-Agent", getRandomDesktopUserAgent()).build();
                 Response resp = client.newCall(req).execute();
                 if (resp.isSuccessful() && resp.body() != null) {
                     content = resp.body().string().trim();
-                    Log.d(TAG, "Fetched from GitHub: " + content);
+                    Log.d(TAG, "Fetched from GitHub");
                 } else {
-                    Log.e(TAG, "GitHub fetch failed, HTTP code: " + (resp != null ? resp.code() : "unknown"));
+                    Log.e(TAG, "GitHub fetch failed, code: " + resp.code());
                 }
             } catch (IOException e) {
                 Log.e(TAG, "GitHub fetch error: " + e.getMessage());
@@ -806,16 +1170,14 @@ public class MainActivity extends AppCompatActivity {
 
             if (content == null) {
                 try {
-                    Request req = new Request.Builder()
-                            .url(GITEE_URL)
-                            .addHeader("User-Agent", getRandomDesktopUserAgent())
-                            .build();
+                    Request req = new Request.Builder().url(GITEE_URL)
+                            .addHeader("User-Agent", getRandomDesktopUserAgent()).build();
                     Response resp = client.newCall(req).execute();
                     if (resp.isSuccessful() && resp.body() != null) {
                         content = resp.body().string().trim();
-                        Log.d(TAG, "Fetched from Gitee: " + content);
+                        Log.d(TAG, "Fetched from Gitee");
                     } else {
-                        Log.e(TAG, "Gitee fetch failed, HTTP code: " + (resp != null ? resp.code() : "unknown"));
+                        Log.e(TAG, "Gitee fetch failed, code: " + resp.code());
                     }
                 } catch (IOException e) {
                     Log.e(TAG, "Gitee fetch error: " + e.getMessage());
@@ -825,11 +1187,9 @@ public class MainActivity extends AppCompatActivity {
             if (content != null && content.startsWith("[") && content.endsWith("]")) {
                 channelGroups = ChannelParser.parseGroupedJson(content);
                 channels.clear();
-                if (channelGroups != null) {
-                    for (ChannelGroup g : channelGroups) {
+                if (channelGroups != null)
+                    for (ChannelGroup g : channelGroups)
                         if (g.getChannels() != null) channels.addAll(g.getChannels());
-                    }
-                }
                 if (!channels.isEmpty()) {
                     prefs.edit().putString(CHANNELS_KEY, content).apply();
                     saveChannelsToConfig(content);
@@ -849,13 +1209,11 @@ public class MainActivity extends AppCompatActivity {
                     if (channelsJson != null) {
                         channelGroups = ChannelParser.parseGroupedJson(channelsJson);
                         channels.clear();
-                        if (channelGroups != null) {
-                            for (ChannelGroup g : channelGroups) {
+                        if (channelGroups != null)
+                            for (ChannelGroup g : channelGroups)
                                 if (g.getChannels() != null) channels.addAll(g.getChannels());
-                            }
-                        }
                         if (!channels.isEmpty()) {
-                            Log.d(TAG, "Loaded " + channels.size() + " channels from SharedPreferences (fallback)");
+                            Log.d(TAG, "Loaded " + channels.size() + " channels from SharedPreferences");
                             setupChannelList();
                             onChannelClicked(channels.get(0));
                             return;
@@ -866,18 +1224,15 @@ public class MainActivity extends AppCompatActivity {
                         if (configFile.exists()) {
                             FileInputStream fis = new FileInputStream(configFile);
                             byte[] buffer = new byte[(int) configFile.length()];
-                            fis.read(buffer);
-                            fis.close();
+                            fis.read(buffer); fis.close();
                             channelsJson = new String(buffer);
                             channelGroups = ChannelParser.parseGroupedJson(channelsJson);
                             channels.clear();
-                            if (channelGroups != null) {
-                                for (ChannelGroup g : channelGroups) {
+                            if (channelGroups != null)
+                                for (ChannelGroup g : channelGroups)
                                     if (g.getChannels() != null) channels.addAll(g.getChannels());
-                                }
-                            }
                             if (!channels.isEmpty()) {
-                                Log.d(TAG, "Loaded " + channels.size() + " channels from channels.config (fallback)");
+                                Log.d(TAG, "Loaded " + channels.size() + " channels from channels.config");
                                 prefs.edit().putString(CHANNELS_KEY, channelsJson).apply();
                                 setupChannelList();
                                 onChannelClicked(channels.get(0));
@@ -891,37 +1246,76 @@ public class MainActivity extends AppCompatActivity {
                 } else {
                     String errorMsg = "网络无法接通";
                     Toast.makeText(this, errorMsg, Toast.LENGTH_LONG).show();
-                    if (tts != null && tts.isLanguageAvailable(Locale.SIMPLIFIED_CHINESE) >= 0) {
+                    if (tts != null && tts.isLanguageAvailable(Locale.SIMPLIFIED_CHINESE) >= 0)
                         tts.speak(errorMsg, TextToSpeech.QUEUE_FLUSH, null, null);
-                        Log.d(TAG, "TTS: 播报 - " + errorMsg);
-                    } else {
-                        Log.w(TAG, "TTS: 无法播报，语言不可用");
-                    }
-                    Log.e(TAG, "All sources failed, openchannel: " + openChannel);
-                    //channels = new ArrayList<>();
-                    //setupChannelList();
-                    //webView.loadUrl(DEFAULT_URL);
+                    Log.e(TAG, "All sources failed");
                 }
             });
         }).start();
     }
 
     private void saveChannelsToConfig(String json) {
-        try (FileOutputStream fos = new FileOutputStream(new File(getFilesDir(), "channels.config"))) {
+        try (FileOutputStream fos = new FileOutputStream(
+                new File(getFilesDir(), "channels.config"))) {
             fos.write(json.getBytes());
         } catch (IOException e) {
             Log.e(TAG, "Save channels config failed", e);
         }
     }
 
+    // ─────────────────────────── permissions & launcher ──────────────────
+
+    private void checkAndRequestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES)
+                    != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.READ_MEDIA_IMAGES},
+                        REQ_STORAGE_PERMISSION);
+            }
+        } else {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
+                    != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},
+                        REQ_STORAGE_PERMISSION);
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        // Carousel will show a Toast if no images are found due to permission denial
+    }
+
+    /** Shows a dialog suggesting this app be set as the default launcher. */
+    private void checkDefaultLauncher() {
+        Intent homeIntent = new Intent(Intent.ACTION_MAIN);
+        homeIntent.addCategory(Intent.CATEGORY_HOME);
+        ResolveInfo resolveInfo = getPackageManager()
+                .resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY);
+        if (resolveInfo != null &&
+                !getPackageName().equals(resolveInfo.activityInfo.packageName)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("设为默认桌面")
+                    .setMessage("将此应用设为默认桌面，遥控器主页键可直接回到频道列表。")
+                    .setPositiveButton("去设置", (d, w) -> startActivity(homeIntent))
+                    .setNegativeButton("暂不", null)
+                    .show();
+        }
+    }
+
+    // ─────────────────────────── immersive mode ───────────────────────────
+
     private void setImmersiveMode() {
         getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
-                        View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION |
-                        View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
-                        View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
-                        View.SYSTEM_UI_FLAG_FULLSCREEN |
-                        View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE          |
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION |
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN      |
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION        |
+                View.SYSTEM_UI_FLAG_FULLSCREEN              |
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
         );
     }
 
@@ -931,27 +1325,53 @@ public class MainActivity extends AppCompatActivity {
         if (hasFocus) setImmersiveMode();
     }
 
+    // ─────────────────────────── back-press ──────────────────────────────
+
     @Override
     public void onBackPressed() {
+        // 1. Close image list overlay inside carousel
+        if (imageListOverlay != null) {
+            hideCarouselImageList();
+            return;
+        }
+        // 2. Stop carousel → return to video
+        if (isCarouselMode) {
+            stopCarousel();
+            return;
+        }
+        // 3. Force-exit stuck loading/ad page → open channel list
+        if (simpleLoadingLayout != null &&
+                simpleLoadingLayout.getVisibility() == View.VISIBLE) {
+            forceExitLoadingPage();
+            drawerLayout.openDrawer(channelList);
+            return;
+        }
+        // 4. Close open drawers
         if (drawerLayout.isDrawerOpen(channelList)) {
             drawerLayout.closeDrawer(channelList);
-        } else if (drawerLayout.isDrawerOpen(rightDrawerContainer)) {
-            drawerLayout.closeDrawer(rightDrawerContainer);
-        } else if (webView.canGoBack()) {
-            webView.goBack();
-        } else {
-            super.onBackPressed();
+            return;
         }
+        if (drawerLayout.isDrawerOpen(rightDrawerContainer)) {
+            drawerLayout.closeDrawer(rightDrawerContainer);
+            return;
+        }
+        // 5. WebView back stack
+        if (webView.canGoBack()) {
+            webView.goBack();
+            return;
+        }
+        // 6. Exit app
+        super.onBackPressed();
     }
+
+    // ─────────────────────────── cleanup ─────────────────────────────────
 
     @Override
     protected void onDestroy() {
+        cancelPauseTimer();
+        if (carouselManager != null && carouselManager.isRunning()) carouselManager.stop();
         if (webView != null) webView.destroy();
-        if (tts != null) {
-            tts.stop();
-            tts.shutdown();
-            Log.d(TAG, "TTS: 已释放资源");
-        }
+        if (tts != null) { tts.stop(); tts.shutdown(); }
         super.onDestroy();
     }
 }

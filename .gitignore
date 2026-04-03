@@ -32,6 +32,11 @@
 # Built application files
 *.apk
 *.aar
+build/
+bin/
+gen/
+*.apk
+*.out
 
 #keystore
 *.key

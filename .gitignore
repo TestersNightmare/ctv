@@ -1,8 +1,17 @@
 # Android Studio
 *.iml
 /.gradle
-/.idea
-/.claude
+# 忽略 Claude 的配置目录
+.claude/
+
+# 忽略 Gradle 构建工具生成的缓存
+.gradle/
+
+# 忽略 IntelliJ IDEA / Android Studio 的项目配置
+.idea/
+
+# 忽略 VS Code 的项目配置
+.vscode/
 /gradle
 /buildAndSign.bat
 /local.properties
@@ -14,6 +23,7 @@
 /.idea/assetWizardSettings.xml
 .DS_Store
 /build
+.claude/worktrees
 
 /captures
 .externalNativeBuild

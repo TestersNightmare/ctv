@@ -5,7 +5,10 @@
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:gravity="center"
-    android:padding="8dp">
+    android:padding="8dp"
+    android:focusable="true"
+    android:clickable="true"
+    android:background="@drawable/channel_item_bg">
 
     <ImageView
         android:id="@+id/channel_icon"

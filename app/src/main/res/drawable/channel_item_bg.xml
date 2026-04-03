@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 获得焦点（遥控器 D-pad 选中） -->
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#552196F3" />
+            <stroke android:width="2dp" android:color="#2196F3" />
+            <corners android:radius="6dp" />
+        </shape>
+    </item>
+
+    <!-- 按下（触屏点击） -->
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#881976D2" />
+            <corners android:radius="6dp" />
+        </shape>
+    </item>
+
+    <!-- 默认：透明 -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@android:color/transparent" />
+        </shape>
+    </item>
+
+</selector>

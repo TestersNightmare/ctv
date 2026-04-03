@@ -70,7 +70,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
     private static final String DEFAULT_URL = "https://www.yangshipin.cn/tv/home?pid=600001859";
     private static final String GITHUB_URL = "https://raw.githubusercontent.com/TestersNightmare/ctv/master/app/src/main/assets/channels.json";
-    private static final String GITEE_URL = "https://gitee.com/magasb/ctvplayer/raw/master/app/src/main/assets/channels.json";
+    private static final String CODEUP_URL = "https://codeup.aliyun.com/69ce4fe6f4aadfa1ed7d4a8e/ctv/raw/master/app/src/main/assets/channels.json";
     private static final String PREFS_NAME = "CTVPlayerPrefs";
     private static final String CHANNELS_KEY = "channels";
     private static final String HISTORY_KEY = "play_history";
@@ -123,6 +123,9 @@ public class MainActivity extends AppCompatActivity {
     private static final long VIDEO_CHECK_INTERVAL = 500;
     private static final int MAX_RELOAD_ATTEMPTS = 3;
     private int currentReloadAttempts = 0;
+    /** 快速重试耗尽后，每隔此时间静默重试一次，直到用户换台或播放成功 */
+    private static final long SLOW_RETRY_INTERVAL_MS = 5_000L;
+    private Runnable retryRunnable;
     private TextToSpeech tts;
     private final OkHttpClient client = new OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
@@ -137,6 +140,9 @@ public class MainActivity extends AppCompatActivity {
     // ─────────────────────────── video state ─────────────────────────────
 
     private boolean isVideoPaused = false;
+    private boolean isLoadingChannel = false; // true：正在加载频道（区别于暂停状态）
+    private boolean isPauseScreen = false;    // true：当前显示的是暂停覆盖层
+    private ImageView pausePlayButton;        // 暂停页中央的播放图标
     private Runnable pauseToCarouselRunnable;
 
     // ─────────────────────────── carousel ────────────────────────────────
@@ -227,6 +233,21 @@ public class MainActivity extends AppCompatActivity {
             @Override public int getSpanSize(int position) { return 1; }
         });
         historyList.setLayoutManager(historyLayoutManager);
+
+        // 抽屉动画结束后将焦点移入列表，确保遥控器方向键可立即导航
+        drawerLayout.addDrawerListener(new DrawerLayout.SimpleDrawerListener() {
+            @Override
+            public void onDrawerOpened(View drawerView) {
+                if (drawerView == channelList) {
+                    channelList.post(() -> channelList.requestFocus());
+                } else {
+                    // 右侧抽屉：历史列表可见时聚焦历史，否则忽略（关于页无需焦点）
+                    if (historyList.getVisibility() == View.VISIBLE) {
+                        historyList.post(() -> historyList.requestFocus());
+                    }
+                }
+            }
+        });
     }
 
     private void initSimpleLoadingLayout() {
@@ -276,11 +297,47 @@ public class MainActivity extends AppCompatActivity {
         center.addView(loadingSpinner);
         simpleLoadingLayout.addView(center);
 
+        // 暂停覆盖层：居中大图标，点击恢复播放（仅在 isPauseScreen 时显示）
+        int playBtnSize = (int) (base * 0.22f);
+        pausePlayButton = new ImageView(this);
+        FrameLayout.LayoutParams pbLp = new FrameLayout.LayoutParams(playBtnSize, playBtnSize, Gravity.CENTER);
+        pausePlayButton.setLayoutParams(pbLp);
+        pausePlayButton.setImageResource(android.R.drawable.ic_media_play);
+        pausePlayButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        pausePlayButton.setBackgroundColor(0x88000000); // 半透明黑底，提升图标可见度
+        pausePlayButton.setVisibility(View.GONE);
+        pausePlayButton.setOnClickListener(v -> toggleVideoPlayPause());
+        simpleLoadingLayout.addView(pausePlayButton);
+
         // Right-side remote control guide panel
         buildRemoteInfoPanel();
 
-        FrameLayout mainLayout = findViewById(android.R.id.content);
-        mainLayout.addView(simpleLoadingLayout);
+        // 广告/加载页面触摸分区：左 30% → 频道列表，右 30% → 历史记录
+        // 解决加载页遮挡 WebView 导致 WebView.OnTouchListener 无法响应的问题
+        simpleLoadingLayout.setOnTouchListener((v, event) -> {
+            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                float x = event.getX();
+                int w = getResources().getDisplayMetrics().widthPixels;
+                if (x < w * 0.3f) {
+                    drawerLayout.openDrawer(channelList);
+                    return true;
+                } else if (x > w * 0.7f) {
+                    drawerLayout.openDrawer(rightDrawerContainer);
+                    return true;
+                }
+            }
+            return false;
+        });
+
+        // 必须挂在 DrawerLayout 的主内容 FrameLayout 内（drawerLayout.getChildAt(0)），
+        // 而非 android.R.id.content。
+        // 原因：drawerLayout 本身是 android.R.id.content 的子 View；
+        // 若把 simpleLoadingLayout 加到 android.R.id.content，
+        // 它会在 DrawerLayout 整体之上，导致抽屉面板（channelList / rightDrawerContainer）
+        // 滑入后被完全遮挡，用户无法看到或触摸频道列表。
+        // 加到 DrawerLayout 内容区后，DrawerLayout 自己的抽屉面板始终渲染在内容区之上。
+        FrameLayout drawerContentFrame = (FrameLayout) drawerLayout.getChildAt(0);
+        drawerContentFrame.addView(simpleLoadingLayout);
     }
 
     /** Builds and adds a semi-transparent remote-control tips panel to the ad page. */
@@ -354,8 +411,10 @@ public class MainActivity extends AppCompatActivity {
             @JavascriptInterface
             public void onVideoReady() {
                 handler.post(() -> {
-                    hideSimpleLoading();
+                    cancelRetry();        // 播放成功，停止所有重试
+                    isLoadingChannel = false;
                     currentReloadAttempts = 0;
+                    hideSimpleLoading();
                 });
             }
 
@@ -364,14 +423,13 @@ public class MainActivity extends AppCompatActivity {
                 Log.e(TAG, "Video loading error: " + error);
                 if (currentReloadAttempts < MAX_RELOAD_ATTEMPTS) {
                     currentReloadAttempts++;
-                    Log.d(TAG, "Retrying load channel, attempt: " + currentReloadAttempts);
+                    Log.d(TAG, "Retrying load channel (JS error), attempt: " + currentReloadAttempts);
                     handler.postDelayed(() -> webView.reload(), 1000);
                 } else {
-                    runOnUiThread(() -> {
-                        hideSimpleLoading();
-                        Toast.makeText(MainActivity.this, "无法加载视频，请重试", Toast.LENGTH_SHORT).show();
-                    });
+                    // 快速重试耗尽 → 转为静默慢速重试，保持加载页可见
                     currentReloadAttempts = 0;
+                    Log.d(TAG, "Switching to slow retry after JS error");
+                    handler.post(() -> scheduleRetry());
                 }
             }
 
@@ -381,6 +439,10 @@ public class MainActivity extends AppCompatActivity {
                 handler.post(() -> {
                     isVideoPaused = true;
                     startPauseTimer();
+                    // 仅在正常播放被暂停时显示暂停页（排除换台加载中的情况）
+                    if (!isCarouselMode && !isLoadingChannel) {
+                        showPauseScreen();
+                    }
                 });
             }
 
@@ -390,6 +452,7 @@ public class MainActivity extends AppCompatActivity {
                 handler.post(() -> {
                     isVideoPaused = false;
                     cancelPauseTimer();
+                    hidePauseScreen(); // 恢复播放时收起暂停覆盖层
                 });
             }
         }, "AndroidBridge");
@@ -405,7 +468,13 @@ public class MainActivity extends AppCompatActivity {
             public void onPageStarted(WebView v, String url, android.graphics.Bitmap favicon) {
                 super.onPageStarted(v, url, favicon);
                 setupDesktopEnvironment();
-                currentReloadAttempts = 0;
+                // ⚠ 不在此重置 currentReloadAttempts！
+                // 每次 reload() 都会触发 onPageStarted，若在此清零，计数器将永远
+                // 在 0→1 间震荡，永远无法到达 MAX_RELOAD_ATTEMPTS，
+                // 导致 scheduleRetry() 永远不被调用。
+                // 重置仅在两个合法时机发生：
+                //   1. loadChannelInBackground()  —— 用户主动换台
+                //   2. onVideoReady()             —— 视频播放成功
             }
 
             @Override
@@ -417,25 +486,63 @@ public class MainActivity extends AppCompatActivity {
                 new Handler(Looper.getMainLooper()).postDelayed(() -> {
                     String js =
                         "(function(){\n" +
+                        // 防止同一页面被多次注入（onPageFinished 可能因重定向等被调用多次）
+                        "  if(window.__ctvInjected) return; window.__ctvInjected = true;\n" +
+                        "  var globalTimer = null;\n" +
+                        // __reported：每次页面注入只上报一次错误，防止多条错误路径同时触发
+                        "  var __reported = false;\n" +
+                        "  function reportError(msg){\n" +
+                        "    if(__reported) return; __reported = true;\n" +
+                        "    AndroidBridge.onVideoError(msg);\n" +
+                        "  }\n" +
+                        // displayVideo：直接操作原始 video 元素，不替换 body.innerHTML。
+                        // 替换 body 会销毁 MSE（Media Source Extensions）上下文，
+                        // 导致 blob:// 流地址失效，所有 MSE 流永远无法播放。
+                        // 改为 position:fixed 覆盖全屏，保留原始 MediaSource 及播放上下文。
                         "  function displayVideo(video){\n" +
-                        "    document.body.innerHTML = '<div style=\"margin:0;padding:0;width:100%;height:100vh;background:#000;overflow:hidden;\">'+video.outerHTML+'</div>';\n" +
-                        "    var v = document.querySelector('video');\n" +
-                        "    v.style.cssText = 'width:100%;height:100%;object-fit:contain;position:absolute;top:0;left:0;z-index:9999;';\n" +
-                        "    v.controls = true;\n" +
-                        "    var notifyReady = function() { if(!v.__notified){ AndroidBridge.onVideoReady(); v.__notified = true; } };\n" +
-                        "    v.addEventListener('playing', notifyReady);\n" +
-                        "    v.addEventListener('timeupdate', function(){ if(v.currentTime > 0) notifyReady(); });\n" +
-                        "    v.addEventListener('pause',   function(){ AndroidBridge.onVideoPaused(); });\n" +
-                        "    v.addEventListener('play',    function(){ AndroidBridge.onVideoPlaying(); });\n" +
-                        "    v.addEventListener('playing', function(){ AndroidBridge.onVideoPlaying(); });\n" +
-                        "    setTimeout(notifyReady, 5000);\n" +
-                        "    var p = v.play();\n" +
-                        "    if(p !== undefined) { p.catch(function(){}); }\n" +
-                        "    if(v.requestFullscreen) v.requestFullscreen();\n" +
+                        "    if(globalTimer){ clearTimeout(globalTimer); globalTimer = null; }\n" +
+                        // 将原始 video 元素固定覆盖全屏（保留 MSE 上下文，不克隆）
+                        "    video.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;" +
+                                "z-index:999999;background:#000;object-fit:contain;';\n" +
+                        "    video.controls = true;\n" +
+                        "    var v = video;\n" +
+                        "    var notifyReady = function(){\n" +
+                        "      if(!__reported && !v.__notified){ v.__notified=true; AndroidBridge.onVideoReady(); }\n" +
+                        "    };\n" +
+                        // 若视频已在播放（我们的 JS 延迟 800ms 注入，可能已经开始了）
+                        "    if(v.currentTime > 0 && !v.paused && !v.ended){ notifyReady(); return; }\n" +
+                        "    v.addEventListener('playing',   notifyReady);\n" +
+                        "    v.addEventListener('timeupdate', function(){ if(v.currentTime>0) notifyReady(); });\n" +
+                        // pause/play/playing 事件：仅在确认播放成功后才上报状态变化
+                        "    v.addEventListener('pause',   function(){ if(v.__notified) AndroidBridge.onVideoPaused(); });\n" +
+                        "    v.addEventListener('play',    function(){ if(v.__notified) AndroidBridge.onVideoPlaying(); });\n" +
+                        "    v.addEventListener('playing', function(){ if(v.__notified) AndroidBridge.onVideoPlaying(); });\n" +
+                        // 视频元素自身错误（流地址无效、解码失败等）
+                        "    v.addEventListener('error', function(){ reportError('verr:'+(v.error?v.error.code:0)); });\n" +
+                        // 8 秒超时：若视频仍未播放则判定失败，触发 Java 端重试
+                        "    setTimeout(function(){\n" +
+                        "      if(!v.__notified){\n" +
+                        "        if(v.currentTime > 0){ notifyReady(); }\n" +
+                        "        else{ reportError('timeout'); }\n" +
+                        "      }\n" +
+                        "    }, 8000);\n" +
+                        // 若视频当前暂停，尝试播放；已在播放则不重复调用 play()
+                        "    if(v.paused || v.ended){\n" +
+                        "      var p = v.play();\n" +
+                        "      if(p !== undefined){ p.catch(function(e){ reportError('play:'+e); }); }\n" +
+                        "    }\n" +
+                        // ⚠ 不调用 requestFullscreen()：
+                        //   App 已通过 immersive mode 全屏；WebView 内调用此 API
+                        //   在 Android 上不支持，且会导致 play() 被中止（AbortError）
                         "  }\n" +
                         "  var vid = document.querySelector('video');\n" +
-                        "  if(vid) displayVideo(vid);\n" +
+                        "  if(vid){ displayVideo(vid); }\n" +
                         "  else {\n" +
+                        // 等待视频元素出现，最多等 10 秒
+                        "    globalTimer = setTimeout(function(){\n" +
+                        "      obs.disconnect();\n" +
+                        "      reportError('novideo');\n" +
+                        "    }, 10000);\n" +
                         "    var obs = new MutationObserver(function(){\n" +
                         "      var v2 = document.querySelector('video');\n" +
                         "      if(v2){ displayVideo(v2); obs.disconnect(); }\n" +
@@ -450,16 +557,18 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onReceivedError(WebView v, WebResourceRequest req, WebResourceError err) {
                 super.onReceivedError(v, req, err);
-                Log.e(TAG, "WebView error: " + err.getDescription());
+                // 只处理主框架错误，忽略页面内子资源（图片/脚本等）的加载失败
+                if (!req.isForMainFrame()) return;
+                Log.e(TAG, "WebView main-frame error: " + err.getDescription());
                 if (currentReloadAttempts < MAX_RELOAD_ATTEMPTS) {
                     currentReloadAttempts++;
-                    Log.d(TAG, "Retrying load channel due to error, attempt: " + currentReloadAttempts);
+                    Log.d(TAG, "Retrying load channel (page error), attempt: " + currentReloadAttempts);
                     handler.postDelayed(() -> webView.reload(), 1000);
                 } else {
-                    hideSimpleLoading();
-                    if (isConfigValid) runOnUiThread(MainActivity.this::loadChannelsFromJson);
-                    Toast.makeText(MainActivity.this, "页面加载失败，请重试", Toast.LENGTH_SHORT).show();
+                    // 快速重试耗尽 → 转为静默慢速重试，保持加载页可见
                     currentReloadAttempts = 0;
+                    Log.d(TAG, "Switching to slow retry after page error");
+                    scheduleRetry();
                 }
             }
         });
@@ -509,13 +618,22 @@ public class MainActivity extends AppCompatActivity {
                 case KeyEvent.KEYCODE_BACK:
                     forceExitLoadingPage();
                     return true;
+                // MENU / HOME / SETTINGS → 退出加载并打开频道列表
                 case KeyEvent.KEYCODE_HOME:
+                case KeyEvent.KEYCODE_MENU:
+                case KeyEvent.KEYCODE_SETTINGS:
                     forceExitLoadingPage();
                     drawerLayout.openDrawer(channelList);
                     return true;
-                case KeyEvent.KEYCODE_MENU:
-                    forceExitLoadingPage();
+                // 方向键左 / 上 → 频道列表浮于加载页之上（无需退出加载）
+                case KeyEvent.KEYCODE_DPAD_LEFT:
+                case KeyEvent.KEYCODE_DPAD_UP:
                     drawerLayout.openDrawer(channelList);
+                    return true;
+                // 方向键右 / 下 → 历史记录浮于加载页之上
+                case KeyEvent.KEYCODE_DPAD_RIGHT:
+                case KeyEvent.KEYCODE_DPAD_DOWN:
+                    showHistoryPage();
                     return true;
             }
         }
@@ -609,6 +727,7 @@ public class MainActivity extends AppCompatActivity {
                 playNextChannel();
                 return true;
             case KeyEvent.KEYCODE_MENU:
+            case KeyEvent.KEYCODE_SETTINGS:  // 部分品牌遥控器以 SETTINGS 键代替 MENU
                 drawerLayout.openDrawer(channelList);
                 return true;
             case KeyEvent.KEYCODE_HOME:
@@ -662,6 +781,58 @@ public class MainActivity extends AppCompatActivity {
             handler.removeCallbacks(pauseToCarouselRunnable);
             pauseToCarouselRunnable = null;
         }
+    }
+
+    // ─────────────────────────── auto retry ──────────────────────────────
+
+    /**
+     * 在 SLOW_RETRY_INTERVAL_MS 后静默重载 WebView，重置快速重试计数。
+     * 每次慢速重试触发后，如果页面再次失败，onReceivedError / onVideoError 会再次调用此方法，
+     * 形成"无限重试"闭环，直到用户换台（cancelRetry）或播放成功（onVideoReady）。
+     */
+    private void scheduleRetry() {
+        cancelRetry();
+        retryRunnable = () -> {
+            currentReloadAttempts = 0; // 重置计数，让快速重试重新工作
+            Log.d(TAG, "Slow retry: reloading WebView");
+            webView.reload();
+        };
+        handler.postDelayed(retryRunnable, SLOW_RETRY_INTERVAL_MS);
+    }
+
+    private void cancelRetry() {
+        if (retryRunnable != null) {
+            handler.removeCallbacks(retryRunnable);
+            retryRunnable = null;
+        }
+    }
+
+    // ─────────────────────────── pause screen ────────────────────────────
+
+    /**
+     * 视频暂停时覆盖广告页面（不隐藏 WebView）。
+     * 中央显示播放图标，左右触摸分区已由 simpleLoadingLayout 的 OnTouchListener 处理。
+     */
+    private void showPauseScreen() {
+        if (isPauseScreen) return; // 已显示，避免重复
+        isPauseScreen = true;
+        // 只显示覆盖层，不隐藏 WebView（视频仍在后面，恢复播放更流畅）
+        loadingSpinner.setVisibility(View.GONE);
+        currentChannelIcon.setVisibility(View.GONE);
+        pausePlayButton.setVisibility(View.VISIBLE);
+        simpleLoadingLayout.animate().cancel();
+        simpleLoadingLayout.setAlpha(1f);
+        simpleLoadingLayout.setVisibility(View.VISIBLE);
+    }
+
+    /** 恢复播放时收起暂停覆盖层。 */
+    private void hidePauseScreen() {
+        if (!isPauseScreen) return;
+        isPauseScreen = false;
+        pausePlayButton.setVisibility(View.GONE);
+        simpleLoadingLayout.setVisibility(View.GONE);
+        // 为下次加载恢复 spinner 可见性
+        loadingSpinner.setVisibility(View.VISIBLE);
     }
 
     // ─────────────────────────── carousel ────────────────────────────────
@@ -829,6 +1000,11 @@ public class MainActivity extends AppCompatActivity {
      * Escape hatch when the page is stuck (e.g., network failure).
      */
     private void forceExitLoadingPage() {
+        cancelRetry();
+        isPauseScreen = false;
+        isLoadingChannel = false;
+        pausePlayButton.setVisibility(View.GONE);
+        loadingSpinner.setVisibility(View.VISIBLE);
         simpleLoadingLayout.animate().cancel();
         simpleLoadingLayout.setAlpha(1f);
         simpleLoadingLayout.setVisibility(View.GONE);
@@ -836,6 +1012,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void hideSimpleLoading() {
+        isPauseScreen = false;
+        isLoadingChannel = false;
+        cancelRetry();
+        pausePlayButton.setVisibility(View.GONE);
+        loadingSpinner.setVisibility(View.VISIBLE);
         webView.setVisibility(View.VISIBLE);
         simpleLoadingLayout.animate()
                 .alpha(0f)
@@ -972,6 +1153,8 @@ public class MainActivity extends AppCompatActivity {
         buttonContainer.setOrientation(LinearLayout.HORIZONTAL);
         buttonContainer.setGravity(Gravity.CENTER);
         buttonContainer.setPadding(16, 16, 16, 16);
+        // 让焦点穿透到子按钮，而不是停在容器本身
+        buttonContainer.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
 
         int containerWidthPx = (int) (300 * getResources().getDisplayMetrics().density);
         int buttonSize = (containerWidthPx - 64) / 3;
@@ -984,6 +1167,9 @@ public class MainActivity extends AppCompatActivity {
         carouselButton.setImageResource(R.drawable.ic_history);
         carouselButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
         carouselButton.setPadding(4, 4, 4, 4);
+        carouselButton.setFocusable(true);
+        carouselButton.setClickable(true);
+        carouselButton.setBackgroundResource(R.drawable.channel_item_bg);
         carouselButton.setOnClickListener(v -> {
             drawerLayout.closeDrawer(channelList, false);
             startCarousel();
@@ -996,6 +1182,9 @@ public class MainActivity extends AppCompatActivity {
         updateButton.setImageResource(R.drawable.ic_update);
         updateButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
         updateButton.setPadding(4, 4, 4, 4);
+        updateButton.setFocusable(true);
+        updateButton.setClickable(true);
+        updateButton.setBackgroundResource(R.drawable.channel_item_bg);
         updateButton.setOnClickListener(v -> updateChannels());
         buttonContainer.addView(updateButton);
 
@@ -1005,6 +1194,9 @@ public class MainActivity extends AppCompatActivity {
         aboutButton.setImageResource(R.drawable.ic_about);
         aboutButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
         aboutButton.setPadding(4, 4, 4, 4);
+        aboutButton.setFocusable(true);
+        aboutButton.setClickable(true);
+        aboutButton.setBackgroundResource(R.drawable.channel_item_bg);
         aboutButton.setOnClickListener(v -> showAboutPage());
         buttonContainer.addView(aboutButton);
 
@@ -1090,6 +1282,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showSimpleLoading(Channel channel) {
+        isPauseScreen = false;
+        isLoadingChannel = true;
+        pausePlayButton.setVisibility(View.GONE);
+        loadingSpinner.setVisibility(View.VISIBLE);
         loadChannelIcon(currentChannelIcon, channel);
         simpleLoadingLayout.animate().cancel();
         simpleLoadingLayout.setAlpha(1f);
@@ -1098,6 +1294,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showSimpleLoading(PlayHistory history) {
+        isPauseScreen = false;
+        isLoadingChannel = true;
+        pausePlayButton.setVisibility(View.GONE);
+        loadingSpinner.setVisibility(View.VISIBLE);
         loadChannelIcon(currentChannelIcon, history);
         simpleLoadingLayout.animate().cancel();
         simpleLoadingLayout.setAlpha(1f);
@@ -1131,6 +1331,8 @@ public class MainActivity extends AppCompatActivity {
 
     private void loadChannelInBackground(Channel channel) {
         if (channel.getUrl() == null || channel.getUrl().isEmpty()) { hideSimpleLoading(); return; }
+        cancelRetry(); // 换台时停止上一频道的所有重试
+        currentReloadAttempts = 0;
         webView.getSettings().setUserAgentString(getRandomDesktopUserAgent());
         Log.d(TAG, "Loading channel: " + channel.getName());
         webView.loadUrl(channel.getUrl());
@@ -1138,6 +1340,8 @@ public class MainActivity extends AppCompatActivity {
 
     private void loadChannelInBackground(PlayHistory history) {
         if (history.getUrl() == null || history.getUrl().isEmpty()) { hideSimpleLoading(); return; }
+        cancelRetry(); // 换台时停止上一频道的所有重试
+        currentReloadAttempts = 0;
         webView.getSettings().setUserAgentString(getRandomDesktopUserAgent());
         Log.d(TAG, "Loading history channel: " + history.getName());
         webView.loadUrl(history.getUrl());
@@ -1200,17 +1404,17 @@ public class MainActivity extends AppCompatActivity {
 
             if (content == null) {
                 try {
-                    Request req = new Request.Builder().url(GITEE_URL)
+                    Request req = new Request.Builder().url(CODEUP_URL)
                             .addHeader("User-Agent", getRandomDesktopUserAgent()).build();
                     Response resp = client.newCall(req).execute();
                     if (resp.isSuccessful() && resp.body() != null) {
                         content = resp.body().string().trim();
-                        Log.d(TAG, "Fetched from Gitee");
+                        Log.d(TAG, "Fetched from Codeup");
                     } else {
-                        Log.e(TAG, "Gitee fetch failed, code: " + resp.code());
+                        Log.e(TAG, "Codeup fetch failed, code: " + resp.code());
                     }
                 } catch (IOException e) {
-                    Log.e(TAG, "Gitee fetch error: " + e.getMessage());
+                    Log.e(TAG, "Codeup fetch error: " + e.getMessage());
                 }
             }
 
@@ -1415,6 +1619,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         cancelPauseTimer();
+        cancelRetry();
         if (carouselManager != null && carouselManager.isRunning()) carouselManager.stop();
         if (webView != null) webView.destroy();
         if (tts != null) { tts.stop(); tts.shutdown(); }

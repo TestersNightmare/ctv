@@ -27,7 +27,9 @@
         android:id="@+id/channel_list"
         android:layout_width="300dp"
         android:layout_height="match_parent"
-        android:layout_gravity="start" />
+        android:layout_gravity="start"
+        android:focusable="true"
+        android:descendantFocusability="afterDescendants" />
 
     <!-- 右侧容器，包含历史记录和关于页面 -->
     <FrameLayout
@@ -40,7 +42,9 @@
             android:id="@+id/history_list"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:visibility="visible" />
+            android:visibility="visible"
+            android:focusable="true"
+            android:descendantFocusability="afterDescendants" />
 
         <!-- 关于页面 -->
         <include

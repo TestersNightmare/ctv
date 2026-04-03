@@ -11,8 +11,8 @@ android {
         applicationId 'com.dex7er.ctvplayer'
         minSdk 25
         targetSdk 36
-        versionCode 102
-        versionName "1.0.2"
+        versionCode 103
+        versionName "1.0.3"
     }
     
     buildTypes {

@@ -1,8 +1,8 @@
 # Android Studio
 *.iml
-.gradle
-.idea/
-.claude/
+/.gradle
+/.idea
+/.claude
 /gradle
 /buildAndSign.bat
 /local.properties

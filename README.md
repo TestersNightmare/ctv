@@ -55,4 +55,3 @@ v1.0.2：
 
 ## License
 Apache-2.0（详见 [LICENSE](LICENSE)）
-https://gitee.com/magasb/ctvplayer/releases/latest/apk

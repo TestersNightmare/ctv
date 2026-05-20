@@ -601,40 +601,58 @@ public class MainActivity extends AppCompatActivity {
 
     // ─────────────────────────── remote control ──────────────────────────
 
+    private boolean isConfirmKey(int keyCode) {
+        return keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+               keyCode == KeyEvent.KEYCODE_ENTER ||
+               keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER ||
+               keyCode == KeyEvent.KEYCODE_BUTTON_A;
+    }
+
+    private boolean isBackKey(int keyCode) {
+        return keyCode == KeyEvent.KEYCODE_BACK ||
+               keyCode == KeyEvent.KEYCODE_ESCAPE;
+    }
+
+    private boolean isMenuKey(int keyCode) {
+        return keyCode == KeyEvent.KEYCODE_MENU ||
+               keyCode == KeyEvent.KEYCODE_SETTINGS ||
+               keyCode == 176 || // KEYCODE_SETTINGS
+               keyCode == KeyEvent.KEYCODE_HELP ||
+               keyCode == KeyEvent.KEYCODE_INFO ||
+               keyCode == KeyEvent.KEYCODE_GUIDE;
+    }
+
     /**
      * Central remote-control dispatcher.
      * Priority: loading/ad page → image list overlay → carousel mode → drawer open → normal video mode.
      */
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        if (event.getAction() != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event);
-
         int keyCode = event.getKeyCode();
+        int action = event.getAction();
+        boolean isDown = (action == KeyEvent.ACTION_DOWN);
 
         // ── 1. Loading/ad page stuck – provide escape hatch ───────────────
         if (simpleLoadingLayout != null &&
                 simpleLoadingLayout.getVisibility() == View.VISIBLE) {
-            switch (keyCode) {
-                case KeyEvent.KEYCODE_BACK:
-                    forceExitLoadingPage();
-                    return true;
-                // MENU / HOME / SETTINGS → 退出加载并打开频道列表
-                case KeyEvent.KEYCODE_HOME:
-                case KeyEvent.KEYCODE_MENU:
-                case KeyEvent.KEYCODE_SETTINGS:
+            if (isBackKey(keyCode)) {
+                if (isDown) forceExitLoadingPage();
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_HOME || isMenuKey(keyCode)) {
+                if (isDown) {
                     forceExitLoadingPage();
                     drawerLayout.openDrawer(channelList);
-                    return true;
-                // 方向键左 / 上 → 频道列表浮于加载页之上（无需退出加载）
-                case KeyEvent.KEYCODE_DPAD_LEFT:
-                case KeyEvent.KEYCODE_DPAD_UP:
-                    drawerLayout.openDrawer(channelList);
-                    return true;
-                // 方向键右 / 下 → 历史记录浮于加载页之上
-                case KeyEvent.KEYCODE_DPAD_RIGHT:
-                case KeyEvent.KEYCODE_DPAD_DOWN:
-                    showHistoryPage();
-                    return true;
+                }
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                if (isDown) drawerLayout.openDrawer(channelList);
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT || keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                if (isDown) showHistoryPage();
+                return true;
             }
         }
 
@@ -643,55 +661,65 @@ public class MainActivity extends AppCompatActivity {
             int cols  = 6;
             int count = imageListAdapter != null ? imageListAdapter.getItemCount() : 0;
             int sel   = imageListAdapter != null ? imageListAdapter.getSelectedPos() : 0;
-            switch (keyCode) {
-                case KeyEvent.KEYCODE_DPAD_RIGHT:
-                    if (sel < count - 1) updateImageListSelection(sel + 1);
-                    return true;
-                case KeyEvent.KEYCODE_DPAD_LEFT:
-                    if (sel > 0) updateImageListSelection(sel - 1);
-                    return true;
-                case KeyEvent.KEYCODE_DPAD_DOWN:
-                    if (sel + cols < count) updateImageListSelection(sel + cols);
-                    return true;
-                case KeyEvent.KEYCODE_DPAD_UP:
-                    if (sel - cols >= 0) updateImageListSelection(sel - cols);
-                    return true;
-                case KeyEvent.KEYCODE_DPAD_CENTER:
-                case KeyEvent.KEYCODE_ENTER:
+            
+            if (isConfirmKey(keyCode)) {
+                if (isDown) {
                     if (carouselManager != null) carouselManager.showImageFromIndex(sel);
                     hideCarouselImageList();
-                    return true;
-                case KeyEvent.KEYCODE_BACK:
-                case KeyEvent.KEYCODE_MENU:
-                    hideCarouselImageList();
-                    return true;
+                }
+                return true;
+            }
+            if (isBackKey(keyCode) || isMenuKey(keyCode)) {
+                if (isDown) hideCarouselImageList();
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                if (isDown && sel < count - 1) updateImageListSelection(sel + 1);
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                if (isDown && sel > 0) updateImageListSelection(sel - 1);
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                if (isDown && sel + cols < count) updateImageListSelection(sel + cols);
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                if (isDown && sel - cols >= 0) updateImageListSelection(sel - cols);
+                return true;
             }
             return true; // consume all other keys while list is open
         }
 
         // ── 3. Carousel mode ──────────────────────────────────────────────
         if (isCarouselMode) {
-            switch (keyCode) {
-                case KeyEvent.KEYCODE_DPAD_LEFT:
-                    if (carouselManager != null) carouselManager.prev();
-                    return true;
-                case KeyEvent.KEYCODE_DPAD_RIGHT:
-                    if (carouselManager != null) carouselManager.next();
-                    return true;
-                case KeyEvent.KEYCODE_DPAD_CENTER:
-                case KeyEvent.KEYCODE_ENTER:
-                    stopCarousel();
-                    return true;
-                case KeyEvent.KEYCODE_MENU:
-                    showCarouselImageList();
-                    return true;
-                case KeyEvent.KEYCODE_BACK:
-                    stopCarousel();
-                    return true;
-                case KeyEvent.KEYCODE_HOME:
+            if (isConfirmKey(keyCode)) {
+                if (isDown) stopCarousel();
+                return true;
+            }
+            if (isBackKey(keyCode)) {
+                if (isDown) stopCarousel();
+                return true;
+            }
+            if (isMenuKey(keyCode)) {
+                if (isDown) showCarouselImageList();
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                if (isDown && carouselManager != null) carouselManager.prev();
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                if (isDown && carouselManager != null) carouselManager.next();
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_HOME) {
+                if (isDown) {
                     stopCarousel();
                     drawerLayout.openDrawer(channelList);
-                    return true;
+                }
+                return true;
             }
             return true; // consume unhandled keys in carousel mode
         }
@@ -699,41 +727,41 @@ public class MainActivity extends AppCompatActivity {
         // ── 4. Drawer open – let RecyclerView handle D-pad focus natively ─
         if (drawerLayout.isDrawerOpen(channelList) ||
                 drawerLayout.isDrawerOpen(rightDrawerContainer)) {
-            switch (keyCode) {
-                case KeyEvent.KEYCODE_BACK:
+            if (isBackKey(keyCode)) {
+                if (isDown) {
                     if (drawerLayout.isDrawerOpen(channelList))
                         drawerLayout.closeDrawer(channelList);
                     if (drawerLayout.isDrawerOpen(rightDrawerContainer))
                         drawerLayout.closeDrawer(rightDrawerContainer);
-                    return true;
-                case KeyEvent.KEYCODE_HOME:
+                }
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_HOME) {
+                if (isDown) {
                     drawerLayout.closeDrawer(channelList);
                     drawerLayout.closeDrawer(rightDrawerContainer);
-                    return true;
+                }
+                return true;
             }
             return super.dispatchKeyEvent(event); // pass D-pad to RecyclerView items
         }
 
         // ── 5. Normal video mode ──────────────────────────────────────────
-        switch (keyCode) {
-            case KeyEvent.KEYCODE_DPAD_CENTER:
-            case KeyEvent.KEYCODE_ENTER:
-                toggleVideoPlayPause();
-                return true;
-            case KeyEvent.KEYCODE_DPAD_LEFT:
-                playPrevChannel();
-                return true;
-            case KeyEvent.KEYCODE_DPAD_RIGHT:
-                playNextChannel();
-                return true;
-            case KeyEvent.KEYCODE_MENU:
-            case KeyEvent.KEYCODE_SETTINGS:  // 部分品牌遥控器以 SETTINGS 键代替 MENU
-                drawerLayout.openDrawer(channelList);
-                return true;
-            case KeyEvent.KEYCODE_HOME:
-                // Open channel list as the app "home page"
-                drawerLayout.openDrawer(channelList);
-                return true;
+        if (isConfirmKey(keyCode)) {
+            if (isDown) toggleVideoPlayPause();
+            return true;
+        }
+        if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+            if (isDown) playPrevChannel();
+            return true;
+        }
+        if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+            if (isDown) playNextChannel();
+            return true;
+        }
+        if (isMenuKey(keyCode) || keyCode == KeyEvent.KEYCODE_HOME) {
+            if (isDown) drawerLayout.openDrawer(channelList);
+            return true;
         }
 
         return super.dispatchKeyEvent(event);
